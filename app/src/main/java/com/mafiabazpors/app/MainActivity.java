@@ -402,8 +402,14 @@ public class MainActivity extends Activity {
     }
 
     private void revealRole(int index) {
+        if (players.isEmpty() || index < 0 || index >= players.size()) {
+            showHome();
+            return;
+        }
+
         revealIndex = index;
         phase = "reveal";
+        saveGame();
         Player p = players.get(index);
 
         base("افشای مخفی", "PRIVATE ROLE REVEAL");
@@ -640,8 +646,11 @@ public class MainActivity extends Activity {
             if (isMafiaRole(p.role)) mafia++;
             else citizens++;
         }
-        if (mafia == 0 && !players.isEmpty()) return "پیروزی شهروندان";
-        if (mafia >= citizens && mafia > 0) return "پیروزی مافیا";
+
+        if (players.isEmpty()) return "بازی ادامه دارد";
+        if (mafia == 0 && citizens == 0) return "پایان همزمان؛ هیچ تیمی باقی نمانده است";
+        if (mafia == 0) return "پیروزی شهروندان";
+        if (citizens == 0 || mafia >= citizens) return "پیروزی مافیا";
         return "بازی ادامه دارد";
     }
 
