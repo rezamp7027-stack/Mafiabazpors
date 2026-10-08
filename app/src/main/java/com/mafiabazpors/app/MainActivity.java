@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
         add(statusCard());
 
         Button night = actionButton("شروع فاز شب", true);
-        night.setOnClickListener(v -> night());
+        night.setOnClickListener(v -> startNight());
         add(night);
 
         Button day = actionButton("شروع فاز روز", false);
@@ -583,9 +583,15 @@ public class MainActivity extends Activity {
         return count;
     }
 
-    private void night() {
+    private void startNight() {
         phase = "night";
         nightActions.clear();
+        saveGame();
+        night();
+    }
+
+    private void night() {
+        phase = "night";
         saveGame();
 
         base("فاز شب", "NIGHT ENGINE");
@@ -659,6 +665,7 @@ public class MainActivity extends Activity {
             Button target = actionButton(p.name, false);
             target.setOnClickListener(v -> {
                 nightActions.put(action, p.name);
+                saveGame();
                 Toast.makeText(this,
                         "ثبت شد: " + p.name,
                         Toast.LENGTH_SHORT
@@ -723,6 +730,7 @@ public class MainActivity extends Activity {
         }
 
         phase = "day";
+        nightActions.clear();
         saveGame();
 
         base("اعلام نتیجه شب", "NIGHT REPORT");
@@ -762,7 +770,7 @@ public class MainActivity extends Activity {
         add(vote);
 
         Button night = actionButton("بازگشت به شب", false);
-        night.setOnClickListener(v -> night());
+        night.setOnClickListener(v -> startNight());
         add(night);
     }
 
@@ -961,9 +969,7 @@ public class MainActivity extends Activity {
         next.setOnClickListener(v -> {
             if (!winState().startsWith("پیروزی")) {
                 dayNumber++;
-                phase = "night";
-                saveGame();
-                night();
+                startNight();
             } else {
                 saveGame();
                 game();
@@ -1066,6 +1072,12 @@ public class MainActivity extends Activity {
             root.put("phase", phase);
             root.put("revealIndex", revealIndex);
 
+            JSONObject actions = new JSONObject();
+            for (Map.Entry<String, String> entry : nightActions.entrySet()) {
+                actions.put(entry.getKey(), entry.getValue());
+            }
+            root.put("nightActions", actions);
+
             prefs.edit().putString("state", root.toString()).apply();
         } catch (Exception ignored) {
         }
@@ -1094,9 +1106,26 @@ public class MainActivity extends Activity {
             phase = root.optString("phase", "game");
             revealIndex = root.optInt("revealIndex", 0);
 
-            if (phase.equals("night")) night();
-            else if (phase.equals("day")) day();
-            else game();
+            nightActions.clear();
+            JSONObject actions = root.optJSONObject("nightActions");
+            if (actions != null) {
+                java.util.Iterator<String> keys = actions.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    nightActions.put(key, actions.getString(key));
+                }
+            }
+
+            if (phase.equals("reveal")) {
+                int safeIndex = Math.max(0, Math.min(revealIndex, players.size() - 1));
+                revealRole(safeIndex);
+            } else if (phase.equals("night")) {
+                night();
+            } else if (phase.equals("day")) {
+                day();
+            } else {
+                game();
+            }
         } catch (Exception e) {
             clearSavedGame();
             showHome();
