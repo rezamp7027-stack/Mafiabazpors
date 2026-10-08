@@ -1,130 +1,1113 @@
 package com.mafiabazpors.app;
 
-import android.app.*;
-import android.os.*;
-import android.content.*;
+import android.app.Activity;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.view.*;
-import android.widget.*;
-import java.util.*;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Bundle;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
+import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 
 public class MainActivity extends Activity {
-    LinearLayout root, content;
-    final int BG=Color.rgb(9,9,9), CARD=Color.rgb(22,22,22), GOLD=Color.rgb(212,175,55), WHITE=Color.WHITE, MUTED=Color.rgb(175,175,175);
-    ArrayList<String> players=new ArrayList<>(), roles=new ArrayList<>();
-    int current=0;
 
-    @Override public void onCreate(Bundle b){
-        super.onCreate(b);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);
+    private static final int BG = Color.rgb(5, 6, 9);
+    private static final int SURFACE = Color.rgb(16, 17, 22);
+    private static final int SURFACE_2 = Color.rgb(22, 23, 30);
+    private static final int GOLD = Color.rgb(216, 174, 62);
+    private static final int GOLD_SOFT = Color.rgb(245, 214, 132);
+    private static final int WHITE = Color.rgb(247, 246, 242);
+    private static final int MUTED = Color.rgb(162, 164, 173);
+    private static final int RED = Color.rgb(205, 70, 70);
+    private static final int GREEN = Color.rgb(73, 179, 117);
+
+    private LinearLayout content;
+    private SharedPreferences prefs;
+
+    private final ArrayList<Player> players = new ArrayList<>();
+    private final HashMap<String, String> nightActions = new HashMap<>();
+    private final HashMap<String, Integer> votes = new HashMap<>();
+    private final HashSet<String> interrogationPair = new HashSet<>();
+
+    private int dayNumber = 1;
+    private String phase = "setup";
+    private int revealIndex = 0;
+
+    private static class Player {
+        String name;
+        String role;
+        boolean alive = true;
+
+        Player(String name, String role) {
+            this.name = name;
+            this.role = role;
+        }
+    }
+
+    private static class RoleInfo {
+        final String name;
+        final String team;
+        final String description;
+        final int image;
+
+        RoleInfo(String name, String team, String description, int image) {
+            this.name = name;
+            this.team = team;
+            this.description = description;
+            this.image = image;
+        }
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        prefs = getSharedPreferences("mafia_state", MODE_PRIVATE);
+        getWindow().setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE
+        );
         showHome();
     }
 
-    TextView tv(String s,int size,boolean bold){
-        TextView t=new TextView(this); t.setText(s); t.setTextColor(WHITE); t.setTextSize(size);
-        t.setGravity(Gravity.CENTER); if(bold)t.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
-        t.setPadding(24,18,24,18); return t;
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
-    Button btn(String s){
-        Button b=new Button(this); b.setText(s); b.setTextColor(GOLD); b.setTextSize(16); b.setAllCaps(false);
-        b.setBackgroundColor(CARD); b.setPadding(12,18,12,18); return b;
+
+    private GradientDrawable gradient(int start, int end, float radiusDp) {
+        GradientDrawable g = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{start, end}
+        );
+        g.setCornerRadius(dp((int) radiusDp));
+        g.setStroke(dp(1), Color.argb(35, 255, 255, 255));
+        return g;
     }
-    void base(String title){
-        root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(BG); root.setPadding(18,28,18,18);
-        TextView h=tv(title,25,true); h.setTextColor(GOLD); root.addView(h,new LinearLayout.LayoutParams(-1,70));
-        content=new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); content.setGravity(Gravity.CENTER_HORIZONTAL);
-        ScrollView sc=new ScrollView(this); sc.addView(content); root.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
-        setContentView(root);
+
+    private TextView text(String value, float size, int color, boolean bold) {
+        TextView t = new TextView(this);
+        t.setText(value);
+        t.setTextColor(color);
+        t.setTextSize(size);
+        t.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+        t.setTypeface(Typeface.create("sans", bold ? Typeface.BOLD : Typeface.NORMAL));
+        t.setPadding(dp(8), dp(6), dp(8), dp(6));
+        t.setTextDirection(View.TEXT_DIRECTION_RTL);
+        return t;
     }
-    void add(View v){ content.addView(v,new LinearLayout.LayoutParams(-1,LinearLayout.LayoutParams.WRAP_CONTENT)); }
-    void showHome(){
-        base("مافیا | سناریوی بازپرس");
-        add(tv("مدیریت حرفه‌ای بازی مافیا",21,true));
-        add(tv("۱۲ یا ۱۳ بازیکن • افشای مخفی نقش • شب و روز • رأی‌گیری",15,false));
-        Button n=btn("بازی جدید"); n.setOnClickListener(v->newGame()); add(n);
-        Button r=btn("قوانین و نقش‌ها"); r.setOnClickListener(v->rules()); add(r);
+
+    private TextView centered(String value, float size, int color, boolean bold) {
+        TextView t = text(value, size, color, bold);
+        t.setGravity(Gravity.CENTER);
+        return t;
     }
-    void newGame(){
-        base("بازی جدید");
-        add(tv("تعداد بازیکنان",19,true));
-        Button b12=btn("۱۲ نفر"); b12.setOnClickListener(v->setup(12)); add(b12);
-        Button b13=btn("۱۳ نفر"); b13.setOnClickListener(v->setup(13)); add(b13);
-        Button back=btn("بازگشت"); back.setOnClickListener(v->showHome()); add(back);
+
+    private View spacer(int height) {
+        View s = new View(this);
+        s.setLayoutParams(new LinearLayout.LayoutParams(1, dp(height)));
+        return s;
     }
-    void setup(int n){
-        base("ثبت بازیکنان");
-        players.clear(); roles.clear();
-        ArrayList<EditText> inputs=new ArrayList<>();
-        for(int i=1;i<=n;i++){
-            EditText e=new EditText(this); e.setHint("بازیکن "+i); e.setTextColor(WHITE); e.setHintTextColor(MUTED); e.setTextSize(16);
-            e.setGravity(Gravity.RIGHT); e.setPadding(20,14,20,14); inputs.add(e); add(e);
-        }
-        Button start=btn("قرعه‌کشی نقش‌ها و شروع"); start.setOnClickListener(v->{
-            players.clear(); for(int i=0;i<inputs.size();i++){String x=inputs.get(i).getText().toString().trim(); players.add(x.isEmpty()?"بازیکن "+(i+1):x);}
-            assign(n); reveal(0);
-        }); add(start);
-    }
-    void assign(int n){
-        roles.clear();
-        String[] base={"پدرخوانده","ناتو","جاسوس","مافیای ساده","دکتر","کارآگاه","بازپرس","ضدگلوله","تک‌تیرانداز","شهروند","شهروند","شهروند","شهروند"};
-        ArrayList<String> a=new ArrayList<>(Arrays.asList(base).subList(0,n));
-        Collections.shuffle(a); roles.addAll(a);
-    }
-    void reveal(int i){
-        current=i; base("افشای مخفی نقش");
-        add(tv("گوشی را به «"+players.get(i)+"» بدهید",21,true));
-        add(tv("هیچ بازیکن دیگری صفحه را نبیند.",16,false));
-        Button show=btn("نمایش نقش"); show.setOnClickListener(v->{
-            base("نقش مخفی");
-            add(tv(roles.get(current),30,true));
-            if(roles.get(current).contains("مافیا")||roles.get(current).equals("ناتو")||roles.get(current).equals("جاسوس")){
-                StringBuilder s=new StringBuilder("هم‌تیمی‌های مافیا:\n");
-                for(int k=0;k<roles.size();k++) if(k!=current && (roles.get(k).contains("مافیا")||roles.get(k).equals("ناتو")||roles.get(k).equals("جاسوس"))) s.append(players.get(k)).append("\n");
-                add(tv(s.toString(),17,false));
+
+    private Button actionButton(String label, boolean primary) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setTextSize(15);
+        b.setTextColor(primary ? BG : GOLD_SOFT);
+        b.setAllCaps(false);
+        b.setTypeface(Typeface.create("sans", Typeface.BOLD));
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(8), dp(4), dp(8), dp(4));
+        b.setBackground(primary
+                ? gradient(GOLD_SOFT, GOLD, 18)
+                : gradient(SURFACE_2, SURFACE, 18));
+        b.setMinHeight(dp(52));
+        b.setOnTouchListener((v, e) -> {
+            if (e.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                v.animate().scaleX(.985f).scaleY(.985f).setDuration(90).start();
+            } else if (e.getAction() == android.view.MotionEvent.ACTION_UP
+                    || e.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                v.animate().scaleX(1f).scaleY(1f).setDuration(120).start();
             }
-            Button hide=btn("پنهان کن و نفر بعد"); hide.setOnClickListener(x->{ if(current+1<players.size()) reveal(current+1); else game(); }); add(hide);
-        }); add(show);
+            return false;
+        });
+        return b;
     }
-    void game(){
-        base("کنترل بازی");
-        add(tv("بازی آماده است",24,true));
-        add(tv("شب: اجرای توانایی‌های نقش‌ها\nروز: اعلام نتایج، مذاکره، بازپرسی و رأی‌گیری",17,false));
-        Button night=btn("شروع شب"); night.setOnClickListener(v->night()); add(night);
-        Button day=btn("شروع روز"); day.setOnClickListener(v->day()); add(day);
-        Button reset=btn("شروع مجدد"); reset.setOnClickListener(v->showHome()); add(reset);
+
+    private LinearLayout card() {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setPadding(dp(16), dp(16), dp(16), dp(16));
+        c.setBackground(gradient(SURFACE_2, SURFACE, 24));
+        return c;
     }
-    void night(){
-        base("شب");
-        add(tv("ترتیب پیشنهادی شب",21,true));
-        String[] stages={"پدرخوانده / مافیا — انتخاب هدف","دکتر — انتخاب نجات","کارآگاه — استعلام","بازپرس — اجرای بازپرسی","تک‌تیرانداز — شلیک","جاسوس / ناتو — توانایی ویژه"};
-        for(String s:stages)add(tv("• "+s,17,false));
-        Button done=btn("پایان شب و ورود به روز"); done.setOnClickListener(v->day()); add(done);
+
+    private void add(View view) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        lp.bottomMargin = dp(12);
+        content.addView(view, lp);
+        view.setAlpha(0f);
+        view.setTranslationY(dp(12));
+        view.animate().alpha(1f).translationY(0f)
+                .setDuration(320)
+                .setInterpolator(new DecelerateInterpolator())
+                .start();
     }
-    void day(){
-        base("روز");
-        add(tv("فاز روز",24,true));
-        add(tv("بحث، مذاکره، بازپرسی دو نفره و رأی‌گیری",17,false));
-        Button q=btn("بازپرسی دو نفره"); q.setOnClickListener(v->interrogation()); add(q);
-        Button vote=btn("رأی‌گیری"); vote.setOnClickListener(v->vote()); add(vote);
-        Button back=btn("بازگشت به کنترل بازی"); back.setOnClickListener(v->game()); add(back);
+
+    private void base(String title, String eyebrow) {
+        FrameLayout shell = new FrameLayout(this);
+        shell.setBackground(gradient(BG, Color.rgb(10, 10, 15), 0));
+
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setPadding(dp(16), dp(18), dp(16), dp(14));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setGravity(Gravity.RIGHT);
+
+        labels.addView(text(eyebrow.toUpperCase(), 10, GOLD, true));
+        labels.addView(text(title, 25, WHITE, true));
+
+        TextView mark = centered("♠", 28, GOLD, true);
+        mark.setBackground(gradient(Color.rgb(30, 27, 15), Color.rgb(15, 15, 18), 20));
+
+        top.addView(labels, new LinearLayout.LayoutParams(0, dp(66), 1f));
+        LinearLayout.LayoutParams markLp = new LinearLayout.LayoutParams(dp(64), dp(64));
+        markLp.setMargins(dp(12), 0, 0, 0);
+        top.addView(mark, markLp);
+        outer.addView(top);
+
+        content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(0, dp(10), 0, dp(24));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
+        scroll.addView(content, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        outer.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+        ));
+
+        shell.addView(outer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+        setContentView(shell);
     }
-    void interrogation(){
-        base("بازپرسی دو نفره");
-        add(tv("دو بازیکن را برای بازپرسی انتخاب کنید",19,true));
-        for(String p:players){Button b=btn(p); b.setOnClickListener(v->Toast.makeText(this,"انتخاب شد: "+p,Toast.LENGTH_SHORT).show()); add(b);}
-        Button back=btn("پایان بازپرسی"); back.setOnClickListener(v->day()); add(back);
+
+    private void showHome() {
+        phase = "home";
+        base("مافیا | بازپرس", "GAME MASTER CONSOLE");
+
+        LinearLayout hero = card();
+        hero.addView(centered("سناریوی بازپرس", 28, GOLD_SOFT, true));
+        hero.addView(spacer(8));
+        hero.addView(centered(
+                "کنسول مدیریت بازی برای ۱۲ تا ۱۳ بازیکن\nطراحی شده برای اجرای آفلاین، سریع و بدون لو رفتن نقش",
+                14, MUTED, false
+        ));
+        add(hero);
+
+        LinearLayout stats = new LinearLayout(this);
+        stats.setOrientation(LinearLayout.HORIZONTAL);
+        String[][] statData = {
+                {"۱۲–۱۳", "بازیکن"},
+                {"۲", "فاز"},
+                {"۱۰+", "نقش"}
+        };
+        for (String[] item : statData) {
+            LinearLayout pill = card();
+            pill.setGravity(Gravity.CENTER);
+            pill.addView(centered(item[0], 18, GOLD_SOFT, true));
+            pill.addView(centered(item[1], 11, MUTED, false));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(84), 1f);
+            lp.setMargins(dp(4), 0, dp(4), 0);
+            stats.addView(pill, lp);
+        }
+        add(stats);
+
+        Button newGame = actionButton("شروع بازی جدید", true);
+        newGame.setOnClickListener(v -> newGame());
+        add(newGame);
+
+        if (hasSavedGame()) {
+            Button resume = actionButton("ادامه بازی ذخیره‌شده", false);
+            resume.setOnClickListener(v -> loadGameAndOpen());
+            add(resume);
+        }
+
+        Button roles = actionButton("کتابخانه نقش‌ها", false);
+        roles.setOnClickListener(v -> rules());
+        add(roles);
+
+        LinearLayout note = card();
+        note.addView(text("حریم بازی", 14, GOLD_SOFT, true));
+        note.addView(text(
+                "محافظت از اسکرین‌کپچر فعال است. نقش‌ها در مرحله افشا فقط برای همان بازیکن نمایش داده می‌شوند.",
+                12, MUTED, false
+        ));
+        add(note);
     }
-    void vote(){
-        base("رأی‌گیری");
-        add(tv("بازیکنی که بیشترین رأی را دارد مشخص کنید.",19,true));
-        for(String p:players){Button b=btn(p); b.setOnClickListener(v->Toast.makeText(this,"رأی ثبت شد برای "+p,Toast.LENGTH_SHORT).show()); add(b);}
-        Button back=btn("پایان رأی‌گیری"); back.setOnClickListener(v->day()); add(back);
+
+    private void newGame() {
+        phase = "setup";
+        base("بازی جدید", "NEW SESSION");
+
+        LinearLayout chooser = card();
+        chooser.addView(centered("تعداد بازیکنان", 20, WHITE, true));
+        chooser.addView(spacer(8));
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button b12 = actionButton("۱۲ نفر", true);
+        Button b13 = actionButton("۱۳ نفر", false);
+        b12.setOnClickListener(v -> setupPlayers(12));
+        b13.setOnClickListener(v -> setupPlayers(13));
+
+        row.addView(b12, new LinearLayout.LayoutParams(0, dp(58), 1f));
+        LinearLayout.LayoutParams b13lp = new LinearLayout.LayoutParams(0, dp(58), 1f);
+        b13lp.setMargins(dp(10), 0, 0, 0);
+        row.addView(b13, b13lp);
+        chooser.addView(row);
+        add(chooser);
+
+        LinearLayout roster = card();
+        roster.addView(text("ترکیب پیشنهادی سناریو", 15, GOLD_SOFT, true));
+        roster.addView(text(
+                "پدرخوانده، ناتو، جاسوس، مافیای ساده، دکتر، کارآگاه، بازپرس، ضدگلوله، تک‌تیرانداز و شهروندها.",
+                12, MUTED, false
+        ));
+        add(roster);
+
+        Button back = actionButton("بازگشت", false);
+        back.setOnClickListener(v -> showHome());
+        add(back);
     }
-    void rules(){
-        base("قوانین و نقش‌ها");
-        String s="پدرخوانده: رهبر تیم مافیا.\n\nناتو: نقش مافیایی با توانایی ویژه سناریو.\n\nجاسوس: عضو تیم مافیا با توانایی اطلاعاتی.\n\nمافیای ساده: عضو عادی تیم مافیا.\n\nدکتر: هر شب یک بازیکن را نجات می‌دهد.\n\nکارآگاه: درباره یک بازیکن استعلام می‌گیرد.\n\nبازپرس: مکانیزم بازپرسی و رأی ویژه را مدیریت می‌کند.\n\nضدگلوله: در برابر شلیک عادی مقاومت دارد.\n\nتک‌تیرانداز: توانایی شلیک ویژه دارد.\n\nشهروند: هدف اصلی کشف و حذف تیم مافیاست.";
-        add(tv(s,16,false));
-        Button b=btn("بازگشت"); b.setOnClickListener(v->showHome()); add(b);
+
+    private void setupPlayers(int count) {
+        base("ثبت بازیکنان", "PLAYER ROSTER");
+        ArrayList<EditText> inputs = new ArrayList<>();
+
+        for (int i = 1; i <= count; i++) {
+            LinearLayout row = card();
+
+            TextView index = centered(String.valueOf(i), 14, GOLD, true);
+            EditText e = new EditText(this);
+            e.setSingleLine(true);
+            e.setHint("نام بازیکن " + i);
+            e.setTextColor(WHITE);
+            e.setHintTextColor(MUTED);
+            e.setTextSize(15);
+            e.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            e.setPadding(dp(10), 0, dp(10), 0);
+            inputs.add(e);
+
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.addView(index, new LinearLayout.LayoutParams(dp(42), dp(52)));
+            LinearLayout.LayoutParams ep = new LinearLayout.LayoutParams(0, dp(52), 1f);
+            ep.setMargins(dp(8), 0, 0, 0);
+            row.addView(e, ep);
+            add(row);
+        }
+
+        Button start = actionButton("ساخت بازی و قرعه‌کشی نقش‌ها", true);
+        start.setOnClickListener(v -> {
+            players.clear();
+            for (int i = 0; i < inputs.size(); i++) {
+                String name = inputs.get(i).getText().toString().trim();
+                if (name.isEmpty()) name = "بازیکن " + (i + 1);
+                players.add(new Player(name, ""));
+            }
+            assignRoles(count);
+            revealIndex = 0;
+            dayNumber = 1;
+            phase = "reveal";
+            nightActions.clear();
+            votes.clear();
+            saveGame();
+            revealRole(0);
+        });
+        add(start);
+    }
+
+    private void assignRoles(int count) {
+        ArrayList<String> pool = new ArrayList<>();
+        Collections.addAll(pool,
+                "پدرخوانده", "ناتو", "جاسوس", "مافیای ساده",
+                "دکتر", "کارآگاه", "بازپرس", "ضدگلوله", "تک‌تیرانداز"
+        );
+        while (pool.size() < count) pool.add("شهروند");
+        Collections.shuffle(pool);
+
+        for (int i = 0; i < players.size(); i++) {
+            players.get(i).role = pool.get(i);
+            players.get(i).alive = true;
+        }
+    }
+
+    private void revealRole(int index) {
+        revealIndex = index;
+        phase = "reveal";
+        Player p = players.get(index);
+
+        base("افشای مخفی", "PRIVATE ROLE REVEAL");
+
+        LinearLayout intro = card();
+        intro.addView(centered("اکنون گوشی دست این بازیکن است:", 13, MUTED, false));
+        intro.addView(centered(p.name, 24, GOLD_SOFT, true));
+        intro.addView(centered("صفحه را به هیچ بازیکن دیگری نشان ندهید.", 11, RED, true));
+        add(intro);
+
+        FrameLayout roleFrame = new FrameLayout(this);
+        roleFrame.setBackground(gradient(
+                Color.rgb(25, 23, 16), Color.rgb(10, 11, 15), 30
+        ));
+
+        ImageView roleImage = new ImageView(this);
+        roleImage.setImageResource(R.drawable.role_card_back);
+        roleImage.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        roleFrame.addView(roleImage, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(280)
+        ));
+        add(roleFrame);
+
+        TextView hint = centered("برای دیدن نقش، دکمه را بزنید", 13, MUTED, false);
+        add(hint);
+
+        Button reveal = actionButton("نمایش نقش", true);
+        reveal.setOnClickListener(v -> {
+            RoleInfo info = roleInfo(p.role);
+            roleImage.setImageResource(info.image);
+            roleImage.setContentDescription("تصویر نقش " + info.name);
+            roleImage.setScaleX(0.15f);
+            roleImage.setAlpha(0.1f);
+            roleImage.animate()
+                    .scaleX(1f).alpha(1f)
+                    .setDuration(480)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
+
+            hint.setText(info.team + " • " + info.description);
+
+            LinearLayout details = card();
+            details.addView(centered(info.name, 30, GOLD_SOFT, true));
+            details.addView(centered(
+                    info.team,
+                    13,
+                    info.team.contains("مافیا") ? RED : GREEN,
+                    true
+            ));
+            details.addView(text(info.description, 13, WHITE, false));
+
+            if (isMafiaRole(p.role)) {
+                details.addView(spacer(8));
+                details.addView(text("هم‌تیمی‌های قابل مشاهده", 13, GOLD, true));
+                details.addView(text(mafiaTeammates(p.name), 13, MUTED, false));
+            }
+
+            add(details);
+            reveal.setVisibility(View.GONE);
+
+            Button next = actionButton(
+                    index + 1 < players.size()
+                            ? "پنهان کن و نفر بعد"
+                            : "پنهان کن و ورود به کنترل بازی",
+                    false
+            );
+            next.setOnClickListener(x -> {
+                if (index + 1 < players.size()) {
+                    revealRole(index + 1);
+                } else {
+                    phase = "game";
+                    saveGame();
+                    game();
+                }
+            });
+            add(next);
+        });
+        add(reveal);
+    }
+
+    private String mafiaTeammates(String currentName) {
+        StringBuilder out = new StringBuilder();
+        for (Player x : players) {
+            if (!x.name.equals(currentName) && isMafiaRole(x.role)) {
+                if (out.length() > 0) out.append("، ");
+                out.append(x.name);
+            }
+        }
+        return out.length() == 0 ? "تنها عضو تیم مافیا" : out.toString();
+    }
+
+    private boolean isMafiaRole(String role) {
+        return role.equals("پدرخوانده")
+                || role.equals("ناتو")
+                || role.equals("جاسوس")
+                || role.equals("مافیای ساده");
+    }
+
+    private RoleInfo roleInfo(String role) {
+        if (role.equals("پدرخوانده"))
+            return new RoleInfo(role, "تیم مافیا",
+                    "رهبر تیم مافیا و تصمیم‌گیر اصلی در حذف شب.",
+                    R.drawable.role_godfather);
+        if (role.equals("ناتو"))
+            return new RoleInfo(role, "تیم مافیا",
+                    "عضو مافیا با توانایی ویژه سناریو که اجرای دقیق آن بر عهده گرداننده است.",
+                    R.drawable.role_nato);
+        if (role.equals("جاسوس"))
+            return new RoleInfo(role, "تیم مافیا",
+                    "عضو اطلاعاتی تیم مافیا؛ وظایف ویژه را گرداننده ثبت می‌کند.",
+                    R.drawable.role_spy);
+        if (role.equals("مافیای ساده"))
+            return new RoleInfo(role, "تیم مافیا",
+                    "عضو عادی تیم مافیا و همراه تصمیم شبانه تیم.",
+                    R.drawable.role_mafia);
+        if (role.equals("دکتر"))
+            return new RoleInfo(role, "تیم شهروند",
+                    "هر شب می‌تواند یک بازیکن را برای نجات انتخاب کند.",
+                    R.drawable.role_doctor);
+        if (role.equals("کارآگاه"))
+            return new RoleInfo(role, "تیم شهروند",
+                    "با استعلام، هویت تیمی یک بازیکن را برای گرداننده مشخص می‌کند.",
+                    R.drawable.role_detective);
+        if (role.equals("بازپرس"))
+            return new RoleInfo(role, "تیم شهروند",
+                    "مجری مکانیزم بازپرسی و رأی ویژه در سناریو.",
+                    R.drawable.role_investigator);
+        if (role.equals("ضدگلوله"))
+            return new RoleInfo(role, "تیم شهروند",
+                    "در برابر شلیک معمولی مقاومت دارد؛ نتیجه نهایی با منطق سناریو ثبت می‌شود.",
+                    R.drawable.role_bulletproof);
+        if (role.equals("تک‌تیرانداز"))
+            return new RoleInfo(role, "تیم شهروند",
+                    "شلیک ویژه دارد و هدف آن توسط گرداننده ثبت می‌شود.",
+                    R.drawable.role_sniper);
+        return new RoleInfo("شهروند", "تیم شهروند",
+                "قدرت ویژه ندارد و با تحلیل و رأی‌گیری به کشف مافیا کمک می‌کند.",
+                R.drawable.role_citizen);
+    }
+
+    private void game() {
+        phase = "game";
+        base("کنترل بازی", "LIVE TABLE");
+        add(statusCard());
+
+        Button night = actionButton("شروع فاز شب", true);
+        night.setOnClickListener(v -> night());
+        add(night);
+
+        Button day = actionButton("شروع فاز روز", false);
+        day.setOnClickListener(v -> day());
+        add(day);
+
+        Button guide = actionButton("کتابخانه نقش‌ها", false);
+        guide.setOnClickListener(v -> rules());
+        add(guide);
+
+        Button reset = actionButton("حذف بازی ذخیره‌شده", false);
+        reset.setOnClickListener(v -> {
+            clearSavedGame();
+            showHome();
+        });
+        add(reset);
+    }
+
+    private LinearLayout statusCard() {
+        LinearLayout c = card();
+        String phaseTitle = phase.equals("night")
+                ? "شب" : phase.equals("day") ? "روز" : "آماده";
+        c.addView(centered(
+                "فاز فعلی: " + phaseTitle + " • روز " + dayNumber,
+                20, GOLD_SOFT, true
+        ));
+        c.addView(centered(
+                "بازیکنان زنده: " + aliveCount() + " / " + players.size(),
+                13, MUTED, false
+        ));
+        c.addView(centered(winState(), 12, WHITE, true));
+        return c;
+    }
+
+    private String winState() {
+        int mafia = 0;
+        int citizens = 0;
+        for (Player p : players) {
+            if (!p.alive) continue;
+            if (isMafiaRole(p.role)) mafia++;
+            else citizens++;
+        }
+        if (mafia == 0 && !players.isEmpty()) return "پیروزی شهروندان";
+        if (mafia >= citizens && mafia > 0) return "پیروزی مافیا";
+        return "بازی ادامه دارد";
+    }
+
+    private int aliveCount() {
+        int count = 0;
+        for (Player p : players) if (p.alive) count++;
+        return count;
+    }
+
+    private void night() {
+        phase = "night";
+        nightActions.clear();
+        saveGame();
+
+        base("فاز شب", "NIGHT ENGINE");
+        add(statusCard());
+
+        add(actionCard("مافیا", "انتخاب هدف حذف شب", "ثبت هدف",
+                v -> chooseNightTarget("قتل مافیا")));
+        add(actionCard("دکتر", "انتخاب بازیکن برای نجات", "ثبت نجات",
+                v -> chooseNightTarget("نجات دکتر")));
+        add(actionCard("کارآگاه", "استعلام تیمی یک بازیکن", "استعلام",
+                v -> chooseInvestigation()));
+        add(actionCard("بازپرس", "ثبت بازپرسی ویژه سناریو", "بازپرسی",
+                v -> interrogation(true)));
+        add(actionCard("تک‌تیرانداز", "ثبت شلیک ویژه", "انتخاب هدف",
+                v -> chooseNightTarget("شلیک تک‌تیرانداز")));
+
+        LinearLayout summary = card();
+        summary.addView(text("اقدامات ثبت‌شده امشب", 14, GOLD_SOFT, true));
+        summary.addView(text(nightActionsSummary(), 12, MUTED, false));
+        add(summary);
+
+        Button finish = actionButton("پایان شب و ورود به روز", true);
+        finish.setOnClickListener(v -> finishNight());
+        add(finish);
+
+        Button back = actionButton("بازگشت به کنترل بازی", false);
+        back.setOnClickListener(v -> game());
+        add(back);
+    }
+
+    private LinearLayout actionCard(
+            String title,
+            String desc,
+            String buttonText,
+            View.OnClickListener listener
+    ) {
+        LinearLayout c = card();
+        c.setOrientation(LinearLayout.HORIZONTAL);
+
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.addView(text(title, 16, GOLD_SOFT, true));
+        labels.addView(text(desc, 11, MUTED, false));
+
+        Button b = actionButton(buttonText, false);
+        b.setOnClickListener(listener);
+
+        c.addView(labels, new LinearLayout.LayoutParams(0, dp(70), 1f));
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(dp(112), dp(60));
+        bp.setMargins(dp(8), 0, 0, 0);
+        c.addView(b, bp);
+        return c;
+    }
+
+    private String nightActionsSummary() {
+        if (nightActions.isEmpty()) return "هنوز اقدامی ثبت نشده است.";
+        StringBuilder out = new StringBuilder();
+        for (Map.Entry<String, String> e : nightActions.entrySet()) {
+            if (out.length() > 0) out.append("\n");
+            out.append("• ").append(e.getKey()).append(" ← ").append(e.getValue());
+        }
+        return out.toString();
+    }
+
+    private void chooseNightTarget(String action) {
+        base("انتخاب هدف", "NIGHT ACTION");
+        add(centered(action, 20, GOLD_SOFT, true));
+
+        for (Player p : players) {
+            if (!p.alive) continue;
+            Button target = actionButton(p.name, false);
+            target.setOnClickListener(v -> {
+                nightActions.put(action, p.name);
+                Toast.makeText(this,
+                        "ثبت شد: " + p.name,
+                        Toast.LENGTH_SHORT
+                ).show();
+                night();
+            });
+            add(target);
+        }
+    }
+
+    private void chooseInvestigation() {
+        base("استعلام کارآگاه", "PRIVATE INVESTIGATION");
+        add(centered("بازیکن مورد نظر را انتخاب کنید", 18, GOLD_SOFT, true));
+
+        for (Player p : players) {
+            if (!p.alive) continue;
+            Button target = actionButton(p.name, false);
+            target.setOnClickListener(v -> {
+                boolean mafia = isMafiaRole(p.role);
+
+                LinearLayout result = card();
+                result.addView(centered("نتیجه استعلام", 18, GOLD_SOFT, true));
+                result.addView(centered(
+                        p.name + " → " + (mafia ? "تیم مافیا" : "تیم شهروند"),
+                        17, mafia ? RED : GREEN, true
+                ));
+                result.addView(text(
+                        "این نتیجه فقط برای گرداننده بازی نمایش داده می‌شود.",
+                        11, MUTED, false
+                ));
+                add(result);
+
+                Button back = actionButton("بازگشت به فاز شب", false);
+                back.setOnClickListener(x -> night());
+                add(back);
+            });
+            add(target);
+        }
+    }
+
+    private void finishNight() {
+        String mafiaTarget = nightActions.get("قتل مافیا");
+        String doctorTarget = nightActions.get("نجات دکتر");
+        String sniperTarget = nightActions.get("شلیک تک‌تیرانداز");
+
+        ArrayList<String> deaths = new ArrayList<>();
+
+        if (mafiaTarget != null && !mafiaTarget.equals(doctorTarget)) {
+            Player p = playerByName(mafiaTarget);
+            if (p != null && p.alive && !p.role.equals("ضدگلوله")) {
+                p.alive = false;
+                deaths.add(p.name);
+            }
+        }
+
+        if (sniperTarget != null) {
+            Player p = playerByName(sniperTarget);
+            if (p != null && p.alive) {
+                p.alive = false;
+                deaths.add(p.name);
+            }
+        }
+
+        phase = "day";
+        saveGame();
+
+        base("اعلام نتیجه شب", "NIGHT REPORT");
+        LinearLayout report = card();
+        report.addView(centered("نتیجه ثبت‌شده", 21, GOLD_SOFT, true));
+
+        if (deaths.isEmpty()) {
+            report.addView(centered(
+                    "امشب مرگ ثبت نشده است.", 17, GREEN, true
+            ));
+        } else {
+            report.addView(text("بازیکنان حذف‌شده:", 13, WHITE, true));
+            for (String death : deaths) {
+                report.addView(text("• " + death, 15, RED, true));
+            }
+        }
+        add(report);
+
+        Button toDay = actionButton("ورود به فاز روز", true);
+        toDay.setOnClickListener(v -> day());
+        add(toDay);
+    }
+
+    private void day() {
+        phase = "day";
+        saveGame();
+
+        base("فاز روز", "DAY ENGINE");
+        add(statusCard());
+
+        Button interrogation = actionButton("بازپرسی دو نفره", true);
+        interrogation.setOnClickListener(v -> interrogation(false));
+        add(interrogation);
+
+        Button vote = actionButton("رأی‌گیری و حذف", false);
+        vote.setOnClickListener(v -> voting());
+        add(vote);
+
+        Button night = actionButton("بازگشت به شب", false);
+        night.setOnClickListener(v -> night());
+        add(night);
+    }
+
+    private void interrogation(boolean nightMode) {
+        base("بازپرسی", nightMode
+                ? "NIGHT INVESTIGATION" : "DAY INTERROGATION");
+        add(centered("دو بازیکن را انتخاب کنید", 18, GOLD_SOFT, true));
+
+        interrogationPair.clear();
+
+        for (Player p : players) {
+            if (!p.alive) continue;
+
+            CheckBox cb = new CheckBox(this);
+            cb.setText(p.name);
+            cb.setTextColor(WHITE);
+            cb.setTextSize(15);
+            cb.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            cb.setButtonTintList(
+                    android.content.res.ColorStateList.valueOf(GOLD)
+            );
+
+            cb.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (isChecked) {
+                    if (interrogationPair.size() >= 2) {
+                        buttonView.setChecked(false);
+                        Toast.makeText(this,
+                                "فقط دو نفر قابل انتخاب است.",
+                                Toast.LENGTH_SHORT
+                        ).show();
+                    } else {
+                        interrogationPair.add(p.name);
+                    }
+                } else {
+                    interrogationPair.remove(p.name);
+                }
+            });
+
+            LinearLayout row = card();
+            row.addView(cb);
+            add(row);
+        }
+
+        Button execute = actionButton("ثبت بازپرسی ویژه", true);
+        execute.setOnClickListener(v -> {
+            if (interrogationPair.size() != 2) {
+                Toast.makeText(this,
+                        "دقیقاً دو بازیکن را انتخاب کنید.",
+                        Toast.LENGTH_SHORT
+                ).show();
+                return;
+            }
+
+            ArrayList<String> pair = new ArrayList<>(interrogationPair);
+            LinearLayout result = card();
+            result.addView(centered(
+                    "زوج بازپرسی", 18, GOLD_SOFT, true
+            ));
+            result.addView(centered(
+                    pair.get(0) + "  ×  " + pair.get(1),
+                    18, WHITE, true
+            ));
+            result.addView(text(
+                    "نتیجه و رأی ویژه این سناریو توسط گرداننده اجرا و در جریان بازی ثبت می‌شود.",
+                    12, MUTED, false
+            ));
+            add(result);
+            saveGame();
+        });
+        add(execute);
+
+        Button back = actionButton("بازگشت", false);
+        back.setOnClickListener(v -> {
+            if (nightMode) night(); else day();
+        });
+        add(back);
+    }
+
+    private void voting() {
+        base("رأی‌گیری", "DAY VOTE");
+        votes.clear();
+        add(centered(
+                "تعداد رأی هر بازیکن را دستی ثبت کنید",
+                18, GOLD_SOFT, true
+        ));
+
+        for (Player p : players) {
+            if (!p.alive) continue;
+
+            LinearLayout row = card();
+            row.setOrientation(LinearLayout.HORIZONTAL);
+
+            TextView count = centered("0", 20, GOLD_SOFT, true);
+            Button minus = actionButton("−", false);
+            Button plus = actionButton("+", false);
+
+            minus.setMinHeight(dp(52));
+            plus.setMinHeight(dp(52));
+            votes.put(p.name, 0);
+
+            minus.setOnClickListener(v -> {
+                int value = Math.max(0, votes.get(p.name) - 1);
+                votes.put(p.name, value);
+                count.setText(String.valueOf(value));
+            });
+
+            plus.setOnClickListener(v -> {
+                int value = votes.get(p.name) + 1;
+                votes.put(p.name, value);
+                count.setText(String.valueOf(value));
+            });
+
+            row.addView(
+                    text(p.name, 15, WHITE, true),
+                    new LinearLayout.LayoutParams(0, dp(56), 1f)
+            );
+            row.addView(
+                    minus,
+                    new LinearLayout.LayoutParams(dp(52), dp(56))
+            );
+
+            LinearLayout.LayoutParams countLp =
+                    new LinearLayout.LayoutParams(dp(54), dp(56));
+            countLp.setMargins(dp(6), 0, dp(6), 0);
+            row.addView(count, countLp);
+
+            row.addView(
+                    plus,
+                    new LinearLayout.LayoutParams(dp(52), dp(56))
+            );
+
+            add(row);
+        }
+
+        Button finish = actionButton("تعیین نتیجه رأی‌گیری", true);
+        finish.setOnClickListener(v -> finishVote());
+        add(finish);
+
+        Button back = actionButton("بازگشت به روز", false);
+        back.setOnClickListener(v -> day());
+        add(back);
+    }
+
+    private void finishVote() {
+        String winner = null;
+        int max = 0;
+        boolean tie = false;
+
+        for (Map.Entry<String, Integer> entry : votes.entrySet()) {
+            int count = entry.getValue();
+
+            if (count > max) {
+                max = count;
+                winner = entry.getKey();
+                tie = false;
+            } else if (count == max && count > 0) {
+                tie = true;
+            }
+        }
+
+        base("نتیجه رأی‌گیری", "VOTE RESULT");
+        LinearLayout result = card();
+
+        if (max == 0) {
+            result.addView(centered(
+                    "هیچ رأیی ثبت نشده است.", 18, MUTED, true
+            ));
+        } else if (tie) {
+            result.addView(centered(
+                    "مساوی شد؛ حذف انجام نشد.", 18, GOLD_SOFT, true
+            ));
+        } else {
+            Player player = playerByName(winner);
+            if (player != null) player.alive = false;
+
+            result.addView(centered(
+                    "بازیکن حذف‌شده", 13, MUTED, false
+            ));
+            result.addView(centered(
+                    winner, 24, RED, true
+            ));
+
+            if (player != null) {
+                result.addView(centered(
+                        roleInfo(player.role).name, 15, WHITE, true
+                ));
+            }
+        }
+
+        add(result);
+
+        String state = winState();
+        if (state.startsWith("پیروزی")) addCenteredWin(state);
+
+        Button next = actionButton("شروع شب بعدی", true);
+        next.setOnClickListener(v -> {
+            if (!winState().startsWith("پیروزی")) {
+                dayNumber++;
+                phase = "night";
+                saveGame();
+                night();
+            } else {
+                saveGame();
+                game();
+            }
+        });
+        add(next);
+
+        saveGame();
+    }
+
+    private void addCenteredWin(String state) {
+        LinearLayout win = card();
+        win.addView(centered("پایان بازی", 13, MUTED, false));
+        win.addView(centered(state, 24, GOLD_SOFT, true));
+        add(win);
+    }
+
+    private void rules() {
+        base("کتابخانه نقش‌ها", "ROLE LIBRARY");
+
+        for (String role : roleNames()) {
+            RoleInfo info = roleInfo(role);
+
+            LinearLayout c = card();
+            c.setOrientation(LinearLayout.HORIZONTAL);
+
+            ImageView image = new ImageView(this);
+            image.setImageResource(info.image);
+            image.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            image.setContentDescription("تصویر نقش " + info.name);
+
+            LinearLayout labels = new LinearLayout(this);
+            labels.setOrientation(LinearLayout.VERTICAL);
+            labels.addView(text(info.name, 17, GOLD_SOFT, true));
+            labels.addView(text(
+                    info.team,
+                    11,
+                    info.team.contains("مافیا") ? RED : GREEN,
+                    true
+            ));
+            labels.addView(text(info.description, 11, MUTED, false));
+
+            c.addView(
+                    image,
+                    new LinearLayout.LayoutParams(dp(96), dp(96))
+            );
+
+            LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+            );
+            labelLp.setMargins(dp(12), 0, 0, 0);
+            c.addView(labels, labelLp);
+
+            add(c);
+        }
+
+        Button back = actionButton("بازگشت", false);
+        back.setOnClickListener(v -> showHome());
+        add(back);
+    }
+
+    private List<String> roleNames() {
+        ArrayList<String> roles = new ArrayList<>();
+        Collections.addAll(
+                roles,
+                "پدرخوانده", "ناتو", "جاسوس", "مافیای ساده",
+                "دکتر", "کارآگاه", "بازپرس", "ضدگلوله",
+                "تک‌تیرانداز", "شهروند"
+        );
+        return roles;
+    }
+
+    private Player playerByName(String name) {
+        if (name == null) return null;
+        for (Player p : players) {
+            if (p.name.equals(name)) return p;
+        }
+        return null;
+    }
+
+    private boolean hasSavedGame() {
+        return prefs != null && prefs.contains("state");
+    }
+
+    private void saveGame() {
+        try {
+            JSONArray array = new JSONArray();
+
+            for (Player p : players) {
+                JSONObject obj = new JSONObject();
+                obj.put("name", p.name);
+                obj.put("role", p.role);
+                obj.put("alive", p.alive);
+                array.put(obj);
+            }
+
+            JSONObject root = new JSONObject();
+            root.put("players", array);
+            root.put("day", dayNumber);
+            root.put("phase", phase);
+            root.put("revealIndex", revealIndex);
+
+            prefs.edit().putString("state", root.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void loadGameAndOpen() {
+        try {
+            JSONObject root = new JSONObject(
+                    prefs.getString("state", "{}")
+            );
+
+            players.clear();
+            JSONArray array = root.getJSONArray("players");
+
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject obj = array.getJSONObject(i);
+                Player p = new Player(
+                        obj.getString("name"),
+                        obj.getString("role")
+                );
+                p.alive = obj.optBoolean("alive", true);
+                players.add(p);
+            }
+
+            dayNumber = root.optInt("day", 1);
+            phase = root.optString("phase", "game");
+            revealIndex = root.optInt("revealIndex", 0);
+
+            if (phase.equals("night")) night();
+            else if (phase.equals("day")) day();
+            else game();
+        } catch (Exception e) {
+            clearSavedGame();
+            showHome();
+        }
+    }
+
+    private void clearSavedGame() {
+        prefs.edit().remove("state").apply();
+        players.clear();
+        nightActions.clear();
+        votes.clear();
+        interrogationPair.clear();
     }
 }
