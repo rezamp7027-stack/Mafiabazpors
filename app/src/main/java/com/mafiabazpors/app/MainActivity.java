@@ -805,6 +805,39 @@ public class MainActivity extends Activity {
             return;
         }
 
+        String previousTarget = nightActions.get("استعلام کارآگاه");
+        if (previousTarget != null) {
+            base("استعلام کارآگاه", "PRIVATE INVESTIGATION");
+            Player previous = playerByName(previousTarget);
+            if (previous == null || !previous.alive) {
+                nightActions.remove("استعلام کارآگاه");
+                saveGame();
+                chooseInvestigation();
+                return;
+            }
+
+            LinearLayout result = card();
+            result.addView(centered("استعلام ثبت‌شده امشب", 18, GOLD_SOFT, true));
+            result.addView(centered(
+                    previous.name + " → "
+                            + (isMafiaRole(previous.role)
+                            ? "تیم مافیا" : "تیم شهروند"),
+                    17,
+                    isMafiaRole(previous.role) ? RED : GREEN,
+                    true
+            ));
+            result.addView(text(
+                    "کارآگاه در هر شب فقط یک استعلام ثبت می‌کند.",
+                    11, MUTED, false
+            ));
+            add(result);
+
+            Button back = actionButton("بازگشت به فاز شب", false);
+            back.setOnClickListener(x -> night());
+            add(back);
+            return;
+        }
+
         base("استعلام کارآگاه", "PRIVATE INVESTIGATION");
         add(centered("بازیکن مورد نظر را انتخاب کنید", 18, GOLD_SOFT, true));
 
@@ -812,6 +845,9 @@ public class MainActivity extends Activity {
             if (!p.alive) continue;
             Button target = actionButton(p.name, false);
             target.setOnClickListener(v -> {
+                nightActions.put("استعلام کارآگاه", p.name);
+                saveGame();
+
                 boolean mafia = isMafiaRole(p.role);
 
                 LinearLayout result = card();
@@ -821,7 +857,7 @@ public class MainActivity extends Activity {
                         17, mafia ? RED : GREEN, true
                 ));
                 result.addView(text(
-                        "این نتیجه فقط برای گرداننده بازی نمایش داده می‌شود.",
+                        "این نتیجه فقط برای گرداننده بازی نمایش داده می‌شود. این استعلام برای این شب ثبت شد.",
                         11, MUTED, false
                 ));
                 add(result);
@@ -1004,6 +1040,8 @@ public class MainActivity extends Activity {
                     12, MUTED, false
             ));
             add(result);
+            execute.setEnabled(false);
+            execute.setVisibility(View.GONE);
             saveGame();
         });
         add(execute);
