@@ -284,6 +284,7 @@ public class MainActivity extends Activity {
     }
 
     private void newGame() {
+        clearSavedGame();
         phase = "setup";
         base("بازی جدید", "NEW SESSION");
 
@@ -347,18 +348,38 @@ public class MainActivity extends Activity {
 
         Button start = actionButton("ساخت بازی و قرعه‌کشی نقش‌ها", true);
         start.setOnClickListener(v -> {
-            players.clear();
+            ArrayList<String> names = new ArrayList<>();
+            HashSet<String> uniqueNames = new HashSet<>();
+
             for (int i = 0; i < inputs.size(); i++) {
                 String name = inputs.get(i).getText().toString().trim();
+                name = name.replaceAll("\\s+", " ");
                 if (name.isEmpty()) name = "بازیکن " + (i + 1);
+
+                String key = name;
+                if (!uniqueNames.add(key)) {
+                    Toast.makeText(
+                            this,
+                            "نام بازیکن «" + name + "» تکراری است.",
+                            Toast.LENGTH_LONG
+                    ).show();
+                    return;
+                }
+                names.add(name);
+            }
+
+            players.clear();
+            for (String name : names) {
                 players.add(new Player(name, ""));
             }
+
             assignRoles(count);
             revealIndex = 0;
             dayNumber = 1;
             phase = "reveal";
             nightActions.clear();
             votes.clear();
+            interrogationPair.clear();
             saveGame();
             revealRole(0);
         });
@@ -475,10 +496,33 @@ public class MainActivity extends Activity {
     }
 
     private boolean isMafiaRole(String role) {
-        return role.equals("پدرخوانده")
-                || role.equals("ناتو")
-                || role.equals("جاسوس")
-                || role.equals("مافیای ساده");
+        return role != null && (
+                role.equals("پدرخوانده")
+                        || role.equals("ناتو")
+                        || role.equals("جاسوس")
+                        || role.equals("مافیای ساده")
+        );
+    }
+
+    private boolean hasAliveRole(String role) {
+        for (Player p : players) {
+            if (p.alive && p.role.equals(role)) return true;
+        }
+        return false;
+    }
+
+    private boolean isNightActionAvailable(String action) {
+        if (action.equals("قتل مافیا")) {
+            return hasAliveRole("پدرخوانده")
+                    || hasAliveRole("ناتو")
+                    || hasAliveRole("جاسوس")
+                    || hasAliveRole("مافیای ساده");
+        }
+        if (action.equals("نجات دکتر")) return hasAliveRole("دکتر");
+        if (action.equals("استعلام")) return hasAliveRole("کارآگاه");
+        if (action.equals("بازپرسی")) return hasAliveRole("بازپرس");
+        if (action.equals("شلیک تک‌تیرانداز")) return hasAliveRole("تک‌تیرانداز");
+        return false;
     }
 
     private RoleInfo roleInfo(String role) {
@@ -525,8 +569,30 @@ public class MainActivity extends Activity {
 
     private void game() {
         phase = "game";
+        saveGame();
         base("کنترل بازی", "LIVE TABLE");
         add(statusCard());
+
+        if (!players.isEmpty() && !winState().equals("بازی ادامه دارد")) {
+            LinearLayout end = card();
+            end.addView(centered("بازی به پایان رسیده است", 21, GOLD_SOFT, true));
+            end.addView(centered(winState(), 20,
+                    winState().contains("مافیا") ? RED : GREEN, true));
+            end.addView(text(
+                    "برای اجرای بازی جدید، وضعیت ذخیره‌شده را پاک کنید.",
+                    12, MUTED, false
+            ));
+            add(end);
+
+            Button resetFinished = actionButton("بازی جدید", true);
+            resetFinished.setOnClickListener(v -> newGame());
+            add(resetFinished);
+
+            Button rolesFinished = actionButton("کتابخانه نقش‌ها", false);
+            rolesFinished.setOnClickListener(v -> rules());
+            add(rolesFinished);
+            return;
+        }
 
         Button night = actionButton("شروع فاز شب", true);
         night.setOnClickListener(v -> startNight());
@@ -550,8 +616,10 @@ public class MainActivity extends Activity {
 
     private LinearLayout statusCard() {
         LinearLayout c = card();
-        String phaseTitle = phase.equals("night")
-                ? "شب" : phase.equals("day") ? "روز" : "آماده";
+        String phaseTitle =
+                phase.equals("night") ? "شب" :
+                phase.equals("day") ? "روز" :
+                phase.equals("voting") ? "رأی‌گیری" : "آماده";
         c.addView(centered(
                 "فاز فعلی: " + phaseTitle + " • روز " + dayNumber,
                 20, GOLD_SOFT, true
@@ -584,29 +652,50 @@ public class MainActivity extends Activity {
     }
 
     private void startNight() {
+        if (players.isEmpty() || !winState().equals("بازی ادامه دارد")) {
+            game();
+            return;
+        }
         phase = "night";
         nightActions.clear();
+        votes.clear();
         saveGame();
         night();
     }
 
     private void night() {
+        if (players.isEmpty() || !winState().equals("بازی ادامه دارد")) {
+            game();
+            return;
+        }
+
         phase = "night";
         saveGame();
 
         base("فاز شب", "NIGHT ENGINE");
         add(statusCard());
 
-        add(actionCard("مافیا", "انتخاب هدف حذف شب", "ثبت هدف",
-                v -> chooseNightTarget("قتل مافیا")));
-        add(actionCard("دکتر", "انتخاب بازیکن برای نجات", "ثبت نجات",
-                v -> chooseNightTarget("نجات دکتر")));
-        add(actionCard("کارآگاه", "استعلام تیمی یک بازیکن", "استعلام",
-                v -> chooseInvestigation()));
-        add(actionCard("بازپرس", "ثبت بازپرسی ویژه سناریو", "بازپرسی",
-                v -> interrogation(true)));
-        add(actionCard("تک‌تیرانداز", "ثبت شلیک ویژه", "انتخاب هدف",
-                v -> chooseNightTarget("شلیک تک‌تیرانداز")));
+        if (hasAliveRole("پدرخوانده") || hasAliveRole("ناتو")
+                || hasAliveRole("جاسوس") || hasAliveRole("مافیای ساده")) {
+            add(actionCard("مافیا", "انتخاب هدف حذف شب", "ثبت هدف",
+                    v -> chooseNightTarget("قتل مافیا")));
+        }
+        if (hasAliveRole("دکتر")) {
+            add(actionCard("دکتر", "انتخاب بازیکن برای نجات", "ثبت نجات",
+                    v -> chooseNightTarget("نجات دکتر")));
+        }
+        if (hasAliveRole("کارآگاه")) {
+            add(actionCard("کارآگاه", "استعلام تیمی یک بازیکن", "استعلام",
+                    v -> chooseInvestigation()));
+        }
+        if (hasAliveRole("بازپرس")) {
+            add(actionCard("بازپرس", "ثبت بازپرسی ویژه سناریو", "بازپرسی",
+                    v -> interrogation(true)));
+        }
+        if (hasAliveRole("تک‌تیرانداز")) {
+            add(actionCard("تک‌تیرانداز", "ثبت شلیک ویژه", "انتخاب هدف",
+                    v -> chooseNightTarget("شلیک تک‌تیرانداز")));
+        }
 
         LinearLayout summary = card();
         summary.addView(text("اقدامات ثبت‌شده امشب", 14, GOLD_SOFT, true));
@@ -657,11 +746,20 @@ public class MainActivity extends Activity {
     }
 
     private void chooseNightTarget(String action) {
+        if (!phase.equals("night") || !isNightActionAvailable(action)) {
+            night();
+            return;
+        }
+
         base("انتخاب هدف", "NIGHT ACTION");
         add(centered(action, 20, GOLD_SOFT, true));
 
+        boolean hasTarget = false;
         for (Player p : players) {
             if (!p.alive) continue;
+            if (action.equals("قتل مافیا") && isMafiaRole(p.role)) continue;
+
+            hasTarget = true;
             Button target = actionButton(p.name, false);
             target.setOnClickListener(v -> {
                 nightActions.put(action, p.name);
@@ -674,9 +772,27 @@ public class MainActivity extends Activity {
             });
             add(target);
         }
+
+        if (!hasTarget) {
+            LinearLayout empty = card();
+            empty.addView(centered(
+                    "هدف مجازی برای این اقدام وجود ندارد.",
+                    16, MUTED, true
+            ));
+            add(empty);
+        }
+
+        Button back = actionButton("بازگشت به فاز شب", false);
+        back.setOnClickListener(v -> night());
+        add(back);
     }
 
     private void chooseInvestigation() {
+        if (!phase.equals("night") || !hasAliveRole("کارآگاه")) {
+            night();
+            return;
+        }
+
         base("استعلام کارآگاه", "PRIVATE INVESTIGATION");
         add(centered("بازیکن مورد نظر را انتخاب کنید", 18, GOLD_SOFT, true));
 
@@ -707,6 +823,11 @@ public class MainActivity extends Activity {
     }
 
     private void finishNight() {
+        if (!phase.equals("night") || players.isEmpty()) {
+            night();
+            return;
+        }
+
         String mafiaTarget = nightActions.get("قتل مافیا");
         String doctorTarget = nightActions.get("نجات دکتر");
         String sniperTarget = nightActions.get("شلیک تک‌تیرانداز");
@@ -715,7 +836,8 @@ public class MainActivity extends Activity {
 
         if (mafiaTarget != null && !mafiaTarget.equals(doctorTarget)) {
             Player p = playerByName(mafiaTarget);
-            if (p != null && p.alive && !p.role.equals("ضدگلوله")) {
+            if (p != null && p.alive && !isMafiaRole(p.role)
+                    && !p.role.equals("ضدگلوله")) {
                 p.alive = false;
                 deaths.add(p.name);
             }
@@ -725,7 +847,7 @@ public class MainActivity extends Activity {
             Player p = playerByName(sniperTarget);
             if (p != null && p.alive) {
                 p.alive = false;
-                deaths.add(p.name);
+                if (!deaths.contains(p.name)) deaths.add(p.name);
             }
         }
 
@@ -749,14 +871,27 @@ public class MainActivity extends Activity {
         }
         add(report);
 
-        Button toDay = actionButton("ورود به فاز روز", true);
-        toDay.setOnClickListener(v -> day());
-        add(toDay);
+        String state = winState();
+        if (!state.equals("بازی ادامه دارد")) {
+            addCenteredWin(state);
+            Button finish = actionButton("پایان بازی", true);
+            finish.setOnClickListener(v -> game());
+            add(finish);
+        } else {
+            Button toDay = actionButton("ورود به فاز روز", true);
+            toDay.setOnClickListener(v -> day());
+            add(toDay);
+        }
     }
 
     private void day() {
         phase = "day";
         saveGame();
+
+        if (!players.isEmpty() && !winState().equals("بازی ادامه دارد")) {
+            game();
+            return;
+        }
 
         base("فاز روز", "DAY ENGINE");
         add(statusCard());
@@ -850,8 +985,17 @@ public class MainActivity extends Activity {
     }
 
     private void voting() {
+        if (players.isEmpty() || !winState().equals("بازی ادامه دارد")) {
+            game();
+            return;
+        }
+
+        boolean restoring = phase.equals("voting") && !votes.isEmpty();
+        if (!restoring) votes.clear();
+        phase = "voting";
+        saveGame();
+
         base("رأی‌گیری", "DAY VOTE");
-        votes.clear();
         add(centered(
                 "تعداد رأی هر بازیکن را دستی ثبت کنید",
                 18, GOLD_SOFT, true
@@ -863,24 +1007,25 @@ public class MainActivity extends Activity {
             LinearLayout row = card();
             row.setOrientation(LinearLayout.HORIZONTAL);
 
-            TextView count = centered("0", 20, GOLD_SOFT, true);
+            int initial = votes.containsKey(p.name) ? votes.get(p.name) : 0;
+            TextView count = centered(String.valueOf(initial), 20, GOLD_SOFT, true);
             Button minus = actionButton("−", false);
             Button plus = actionButton("+", false);
 
-            minus.setMinHeight(dp(52));
-            plus.setMinHeight(dp(52));
-            votes.put(p.name, 0);
+            votes.put(p.name, initial);
 
             minus.setOnClickListener(v -> {
                 int value = Math.max(0, votes.get(p.name) - 1);
                 votes.put(p.name, value);
                 count.setText(String.valueOf(value));
+                saveGame();
             });
 
             plus.setOnClickListener(v -> {
                 int value = votes.get(p.name) + 1;
                 votes.put(p.name, value);
                 count.setText(String.valueOf(value));
+                saveGame();
             });
 
             row.addView(
@@ -915,11 +1060,19 @@ public class MainActivity extends Activity {
     }
 
     private void finishVote() {
+        if (!phase.equals("voting") || players.isEmpty()) {
+            day();
+            return;
+        }
+
         String winner = null;
         int max = 0;
         boolean tie = false;
 
         for (Map.Entry<String, Integer> entry : votes.entrySet()) {
+            Player candidate = playerByName(entry.getKey());
+            if (candidate == null || !candidate.alive) continue;
+
             int count = entry.getValue();
 
             if (count > max) {
@@ -960,24 +1113,31 @@ public class MainActivity extends Activity {
             }
         }
 
+        phase = "day";
+        votes.clear();
+        saveGame();
         add(result);
 
         String state = winState();
-        if (state.startsWith("پیروزی")) addCenteredWin(state);
+        if (!state.equals("بازی ادامه دارد")) {
+            addCenteredWin(state);
+
+            Button finish = actionButton("پایان بازی", true);
+            finish.setOnClickListener(v -> game());
+            add(finish);
+            return;
+        }
 
         Button next = actionButton("شروع شب بعدی", true);
         next.setOnClickListener(v -> {
-            if (!winState().startsWith("پیروزی")) {
-                dayNumber++;
-                startNight();
-            } else {
-                saveGame();
-                game();
-            }
+            dayNumber++;
+            startNight();
         });
         add(next);
 
-        saveGame();
+        Button back = actionButton("بازگشت به روز", false);
+        back.setOnClickListener(v -> day());
+        add(back);
     }
 
     private void addCenteredWin(String state) {
@@ -1067,6 +1227,7 @@ public class MainActivity extends Activity {
             }
 
             JSONObject root = new JSONObject();
+            root.put("version", 2);
             root.put("players", array);
             root.put("day", dayNumber);
             root.put("phase", phase);
@@ -1078,8 +1239,15 @@ public class MainActivity extends Activity {
             }
             root.put("nightActions", actions);
 
+            JSONObject savedVotes = new JSONObject();
+            for (Map.Entry<String, Integer> entry : votes.entrySet()) {
+                savedVotes.put(entry.getKey(), entry.getValue());
+            }
+            root.put("votes", savedVotes);
+
             prefs.edit().putString("state", root.toString()).apply();
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Toast.makeText(this, "ذخیره وضعیت بازی ناموفق بود.", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1092,19 +1260,31 @@ public class MainActivity extends Activity {
             players.clear();
             JSONArray array = root.getJSONArray("players");
 
+            if (array.length() != 12 && array.length() != 13) {
+                throw new IllegalStateException("invalid player count");
+            }
+
+            HashSet<String> uniqueNames = new HashSet<>();
             for (int i = 0; i < array.length(); i++) {
                 JSONObject obj = array.getJSONObject(i);
-                Player p = new Player(
-                        obj.getString("name"),
-                        obj.getString("role")
-                );
+                String name = obj.getString("name").trim();
+                String role = obj.getString("role").trim();
+                if (name.isEmpty() || role.isEmpty() || !uniqueNames.add(name)) {
+                    throw new IllegalStateException("invalid player data");
+                }
+
+                Player p = new Player(name, role);
                 p.alive = obj.optBoolean("alive", true);
                 players.add(p);
             }
 
-            dayNumber = root.optInt("day", 1);
+            dayNumber = Math.max(1, root.optInt("day", 1));
             phase = root.optString("phase", "game");
             revealIndex = root.optInt("revealIndex", 0);
+
+            if (revealIndex < 0 || revealIndex >= players.size()) {
+                revealIndex = 0;
+            }
 
             nightActions.clear();
             JSONObject actions = root.optJSONObject("nightActions");
@@ -1112,15 +1292,32 @@ public class MainActivity extends Activity {
                 java.util.Iterator<String> keys = actions.keys();
                 while (keys.hasNext()) {
                     String key = keys.next();
-                    nightActions.put(key, actions.getString(key));
+                    String value = actions.getString(key);
+                    if (value != null && playerByName(value) != null) {
+                        nightActions.put(key, value);
+                    }
+                }
+            }
+
+            votes.clear();
+            JSONObject savedVotes = root.optJSONObject("votes");
+            if (savedVotes != null) {
+                java.util.Iterator<String> keys = savedVotes.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    Player p = playerByName(key);
+                    if (p != null && p.alive) {
+                        votes.put(key, Math.max(0, savedVotes.optInt(key, 0)));
+                    }
                 }
             }
 
             if (phase.equals("reveal")) {
-                int safeIndex = Math.max(0, Math.min(revealIndex, players.size() - 1));
-                revealRole(safeIndex);
+                revealRole(revealIndex);
             } else if (phase.equals("night")) {
                 night();
+            } else if (phase.equals("voting")) {
+                voting();
             } else if (phase.equals("day")) {
                 day();
             } else {
@@ -1129,6 +1326,10 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             clearSavedGame();
             showHome();
+            Toast.makeText(this,
+                    "بازی ذخیره‌شده معتبر نبود و پاک شد.",
+                    Toast.LENGTH_LONG
+            ).show();
         }
     }
 
