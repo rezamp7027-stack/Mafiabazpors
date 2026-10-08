@@ -511,8 +511,9 @@ public class MainActivity extends Activity {
     }
 
     private boolean hasAliveRole(String role) {
+        if (role == null) return false;
         for (Player p : players) {
-            if (p.alive && p.role.equals(role)) return true;
+            if (p.alive && role.equals(p.role)) return true;
         }
         return false;
     }
@@ -532,6 +533,8 @@ public class MainActivity extends Activity {
     }
 
     private RoleInfo roleInfo(String role) {
+        if (role == null || role.trim().isEmpty()) role = "شهروند";
+
         if (role.equals("پدرخوانده"))
             return new RoleInfo(role, "تیم مافیا",
                     "رهبر تیم مافیا و تصمیم‌گیر اصلی در حذف شب.",
@@ -905,9 +908,11 @@ public class MainActivity extends Activity {
         base("فاز روز", "DAY ENGINE");
         add(statusCard());
 
-        Button interrogation = actionButton("بازپرسی دو نفره", true);
-        interrogation.setOnClickListener(v -> interrogation(false));
-        add(interrogation);
+        if (hasAliveRole("بازپرس")) {
+            Button interrogation = actionButton("بازپرسی دو نفره", true);
+            interrogation.setOnClickListener(v -> interrogation(false));
+            add(interrogation);
+        }
 
         Button vote = actionButton("رأی‌گیری و حذف", false);
         vote.setOnClickListener(v -> voting());
@@ -919,6 +924,23 @@ public class MainActivity extends Activity {
     }
 
     private void interrogation(boolean nightMode) {
+        if (!players.isEmpty() && !winState().equals("بازی ادامه دارد")) {
+            game();
+            return;
+        }
+
+        if (nightMode) {
+            if (!phase.equals("night") || !hasAliveRole("بازپرس")) {
+                night();
+                return;
+            }
+        } else {
+            if (!phase.equals("day") || !hasAliveRole("بازپرس")) {
+                day();
+                return;
+            }
+        }
+
         base("بازپرسی", nightMode
                 ? "NIGHT INVESTIGATION" : "DAY INTERROGATION");
         add(centered("دو بازیکن را انتخاب کنید", 18, GOLD_SOFT, true));
@@ -1274,11 +1296,15 @@ public class MainActivity extends Activity {
             }
 
             HashSet<String> uniqueNames = new HashSet<>();
+            List<String> knownRoles = roleNames();
+
             for (int i = 0; i < array.length(); i++) {
                 JSONObject obj = array.getJSONObject(i);
                 String name = obj.getString("name").trim();
                 String role = obj.getString("role").trim();
-                if (name.isEmpty() || role.isEmpty() || !uniqueNames.add(name)) {
+                if (name.isEmpty() || role.isEmpty()
+                        || !uniqueNames.add(name)
+                        || !knownRoles.contains(role)) {
                     throw new IllegalStateException("invalid player data");
                 }
 
@@ -1289,8 +1315,15 @@ public class MainActivity extends Activity {
 
             dayNumber = Math.max(1, root.optInt("day", 1));
             phase = root.optString("phase", "game");
-            revealIndex = root.optInt("revealIndex", 0);
+            if (!phase.equals("reveal")
+                    && !phase.equals("night")
+                    && !phase.equals("day")
+                    && !phase.equals("voting")
+                    && !phase.equals("game")) {
+                phase = "game";
+            }
 
+            revealIndex = root.optInt("revealIndex", 0);
             if (revealIndex < 0 || revealIndex >= players.size()) {
                 revealIndex = 0;
             }
