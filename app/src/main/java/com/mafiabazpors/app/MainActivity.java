@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -20,6 +22,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -54,6 +57,8 @@ public class MainActivity extends Activity {
     private static final String GREEN = "#8BC49A";
     private static final int PICK_EXPORT = 401;
     private static final int PICK_IMPORT = 402;
+    private static final int PICK_ROLE_IMAGE = 403;
+    private static final int DATA_SCHEMA_VERSION = 2;
 
     private SharedPreferences preferences;
     private ArrayList<Role> roles = new ArrayList<>();
@@ -73,6 +78,12 @@ public class MainActivity extends Activity {
     private boolean roleOnlyExport = false;
     private View dealCardView;
     private boolean animateDealCard = false;
+    private ScrollView pageScrollView;
+    private String renderedScreen = null;
+    private String pendingImageRoleId = null;
+    private final HashMap<String, Integer> screenScrollPositions = new HashMap<>();
+    private final HashMap<String, Bitmap> portraitCache = new HashMap<>();
+    private Bitmap portraitSheet;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -85,6 +96,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadLocalData() {
+        int storedSchema = preferences.getInt("schemaVersion", 0);
         try {
             String rawRoles = preferences.getString("roles", null);
             if (rawRoles != null) {
@@ -102,36 +114,96 @@ public class MainActivity extends Activity {
             roles.clear();
             lineups.clear();
         }
+
+        ArrayList<Role> defaults = defaultRoles();
         if (roles.isEmpty()) {
-            roles = defaultRoles();
-            saveAll();
+            roles.addAll(defaults);
+        } else if (storedSchema < DATA_SCHEMA_VERSION) {
+            // One-time migration: refresh built-in entries and add new scenario roles,
+            // without touching user-created roles or their saved lineups.
+            for (Role seed : defaults) {
+                int found = -1;
+                for (int i = 0; i < roles.size(); i++) {
+                    if (roles.get(i).id.equals(seed.id)) { found = i; break; }
+                }
+                if (found >= 0) {
+                    seed.imageUri = roles.get(found).imageUri;
+                    roles.set(found, seed);
+                } else {
+                    roles.add(seed);
+                }
+            }
         }
+        preferences.edit().putInt("schemaVersion", DATA_SCHEMA_VERSION).apply();
+        saveAll();
     }
 
     private ArrayList<Role> defaultRoles() {
         ArrayList<Role> result = new ArrayList<>();
-        result.add(new Role("citizen-simple", "شهروند ساده", "شهروندی", "پایه", "●",
-                "نقش پایهٔ شهروندی", "قابلیت ویژه‌ای برای این نقش تعریف نشده است.",
-                "شرایط پیروزی را طبق قوانین گروه خود تعیین کنید.", 0, true, true));
+
+        // Role descriptions below follow one published guide to the Bazpors scenario.
+        // The scenario is run in different editions; the group’s own rulebook takes precedence.
+        result.add(new Role("godfather", "رئیس مافیا", "مافیایی", "رهبر", "◆",
+                "رهبر تیم مافیا؛ انتخاب شلیک شب و یک فرصت سوداگری در نسخهٔ مرجع.",
+                "هر شب، انتخاب شلیک تیم با رئیس مافیاست. استعلام او برای کارآگاه منفی گزارش می‌شود. در صورت زنده‌بودن رئیس، یک‌بار در بازی می‌تواند سوداگری را اجرا کند: یکی از اعضای مافیا را قربانی و برای جذب شهروند ساده یا رویین‌تن مذاکره کند. مذاکره با نقش‌های دیگر در نسخهٔ مرجع ناموفق است. اسنایپر نمی‌تواند رئیس مافیا را حذف کند.",
+                "پیروزی جناح مافیا؛ در راهنمای مرجع، رسیدن تعداد مافیا به تعداد شهروندان شرط برد عنوان شده است.", 1, true, true));
+        result.add(new Role("nato", "ناتو", "مافیایی", "نفوذ و حدس نقش", "◆",
+                "یک‌بار در بازی می‌تواند نقش دقیق یک بازیکن را حدس بزند.",
+                "یک بار در کل بازی، نقش دقیق یک نفر را حدس می‌زند. اگر حدس درست باشد، هدف در روز از بازی خارج می‌شود؛ اگر اشتباه باشد اثری ندارد. در شبی که ناتو از این توانایی استفاده می‌کند، تیم مافیا شلیک شبانه ندارد.",
+                "پیروزی با جناح مافیا؛ قواعد استفاده را با نسخهٔ میز خود تطبیق دهید.", 1, true, true));
+        result.add(new Role("shayad", "شیاد", "مافیایی", "اختلال استعلام", "◆",
+                "نقشی برای هدف‌گرفتن کارآگاه و مخدوش‌کردن استعلام‌ها.",
+                "طبق راهنمای مرجع، هدف اصلی شیاد یافتن کارآگاه است. اگر کارآگاه را پیدا کند، استعلام اعضای مافیا برای کارآگاه منفی خواهد شد. راهنما اجازهٔ انتخاب یک هدف در شب و تکرار همان هدف در دو شب پیاپی را ذکر می‌کند.",
+                "پیروزی با جناح مافیا؛ جزئیات استعلام ممکن است در نسخه‌های مختلف متفاوت باشد.", 1, true, true));
         result.add(new Role("mafia-simple", "مافیای ساده", "مافیایی", "پایه", "◆",
-                "نقش پایهٔ مافیایی", "قابلیت ویژه‌ای برای این نقش تعریف نشده است.",
-                "شرایط پیروزی را طبق قوانین گروه خود تعیین کنید.", 0, true, true));
-        result.add(new Role("bazpors-template", "بازپرس", "ویژه سناریوی بازپرس", "ویژه", "⚖",
-                "قالب قابل‌تنظیم؛ قانون رسمی در این نسخه ادعا نشده است.",
-                "قابلیت رسمی در این نسخه وارد نشده است؛ متن معتبر سناریوی خود را اینجا ثبت کنید.",
-                "شرایط پیروزی را مدیر بازی طبق منبع معتبر وارد کند.", 0, true, true));
-        result.add(new Role("detective-template", "کارآگاه", "شهروندی", "ویژه", "⌕",
-                "قالب قابل‌تنظیم برای نقش کارآگاه", "قابلیت را مدیر بازی طبق قوانین مورد استفاده تعریف کند.",
-                "شرایط پیروزی را مدیر بازی تعریف کند.", 0, true, true));
-        result.add(new Role("doctor-template", "دکتر", "شهروندی", "ویژه", "✚",
-                "قالب قابل‌تنظیم برای نقش دکتر", "قابلیت را مدیر بازی طبق قوانین مورد استفاده تعریف کند.",
-                "شرایط پیروزی را مدیر بازی تعریف کند.", 0, true, true));
+                "عضو تیم مافیا بدون قابلیت شبانهٔ مستقل.",
+                "در شب توانایی ویژهٔ جداگانه‌ای ندارد و در انتخاب شلیک به رئیس مافیا کمک می‌کند. در روز با گفت‌وگو و رأی‌گیری تلاش می‌کند هویت هم‌تیمی‌ها را پنهان نگه دارد.",
+                "پیروزی با جناح مافیا؛ طبق راهنمای مرجع، رسیدن شمار مافیا به شمار شهروندان شرط برد است.", 0, true, true));
+        result.add(new Role("doctor-template", "پزشک", "شهروندی", "نجات", "✚",
+                "هر شب می‌تواند یک بازیکن را از شلیک مافیا نجات دهد.",
+                "هر شب یک نفر را انتخاب می‌کند تا در برابر شلیک شبانه نجات یابد. راهنمای مرجع برای کل بازی دو بار اجازهٔ خودنجاتی ذکر می‌کند. پیش از بازی، تعداد و محدودیت خودنجاتی را با نسخهٔ قوانین گروه نهایی کنید.",
+                "پیروزی با شهر؛ شناسایی و حذف اعضای مافیا از راه گفت‌وگو و رأی‌گیری.", 1, true, true));
+        result.add(new Role("detective-template", "کارآگاه", "شهروندی", "استعلام", "⌕",
+                "هر شب استعلام مافیایی‌بودن یک بازیکن را می‌گیرد.",
+                "هر شب یک بازیکن را برای استعلام انتخاب می‌کند. رئیس مافیا در راهنمای مرجع همیشه استعلام منفی می‌گیرد؛ اگر شیاد کارآگاه را شناسایی کرده باشد، استعلام اعضای مافیا نیز منفی می‌شود. نتیجهٔ استعلام به‌تنهایی جایگزین بحث و رأی‌گیری نیست.",
+                "پیروزی با شهر؛ کمک به شناسایی مافیا بدون آشکارکردن زودهنگام اطلاعات حیاتی.", 1, true, true));
+        result.add(new Role("roein-tan", "رویین‌تن", "شهروندی", "مقاومت", "◆",
+                "در نسخهٔ مرجع با شلیک شبانهٔ مافیا حذف نمی‌شود.",
+                "مصونیت این نقش در راهنمای مرجع مربوط به شلیک مافیا در شب است؛ رأی‌گیری روز همچنان می‌تواند او را از بازی خارج کند. رئیس مافیا می‌تواند رویین‌تن را یکی از اهداف مجاز مذاکره برای سوداگری انتخاب کند.",
+                "پیروزی با شهر؛ با مشارکت در استدلال و رأی‌گیری به شناسایی مافیا کمک کنید.", 1, true, true));
+        result.add(new Role("sniper", "اسنایپر", "شهروندی", "شلیک محدود", "◆",
+                "یک تیر در کل بازی؛ انتخاب اشتباه می‌تواند به حذف خودش منجر شود.",
+                "یک بار در طول بازی شلیک می‌کند. طبق راهنمای مرجع، اگر شهروند را به اشتباه هدف بگیرد خودش از بازی خارج می‌شود. هدف‌گرفتن عضو مافیا (به‌جز رئیس مافیا) می‌تواند او را حذف کند، مگر اینکه همان شب پزشک نجاتش داده باشد.",
+                "پیروزی با شهر؛ شلیک را با اطلاعات و شواهد کافی انجام دهید.", 1, true, false));
+        result.add(new Role("mohaqeq", "محقق", "شهروندی", "پیوند", "◆",
+                "شبانه به یک بازیکن پیوند می‌زند؛ حذف بعضی نقش‌های منفی می‌تواند پیامد دوم داشته باشد.",
+                "به‌جز شب معارفه، هر شب یک بازیکن را انتخاب می‌کند و به او پیوند می‌زند. طبق راهنمای مرجع، اگر محقق از بازی خارج شود و پیوند آخرش روی ناتو یا شیاد باشد، آن بازیکن هم خارج می‌شود؛ پیوند به رئیس مافیا یا مافیای ساده چنین اثری ندارد. در این راهنما اثر پیوند شب آخر ملاک است.",
+                "پیروزی با شهر؛ انتخاب هدف و زمان‌بندی پیوند مهم است.", 1, true, true));
+        result.add(new Role("bazpors-template", "بازپرس", "ویژه سناریوی بازپرس", "بازپرسی", "⚖",
+                "یک بار در بازی، دو نفر را برای دفاعیهٔ ویژهٔ روز بعد انتخاب می‌کند.",
+                "طبق راهنمای مرجع، بازپرس یک‌بار دو بازیکن را برای بازپرسی انتخاب می‌کند. اگر هر دو تا صبح در بازی بمانند، هر کدام دو نوبت ۳۰ ثانیه‌ای برای دفاع دارند؛ سپس بازپرس می‌تواند روند رأی‌گیری بین آن دو را ادامه دهد یا لغو کند. با ادامه‌دادن، همه باید به یکی از آن دو رأی دهند و فرد دارای رأی بیشتر با اعلام نقش خارج می‌شود. لغو یا رأی برابر باعث ماندن هر دو می‌شود. اگر یکی از دو هدف همان شب حذف شود، توانایی در راهنمای مرجع بازمی‌گردد؛ حتی حذف‌شدن خود بازپرس نیز الزاماً این روند را لغو نمی‌کند.",
+                "پیروزی با شهر؛ اجرای دقیق ترتیب دفاع و رأی‌گیری باید توسط گرداننده انجام شود.", 1, true, false));
+        result.add(new Role("citizen-simple", "شهروند ساده", "شهروندی", "پایه", "●",
+                "بدون عمل شبانه؛ قدرت اصلی از تحلیل، گفت‌وگو و رأی‌گیری می‌آید.",
+                "در شب قابلیت مستقلی ندارد. در روز اطلاعات گفت‌وگوها را تحلیل می‌کند، تناقض‌ها را می‌سنجد، اتهام و دفاع را ارزیابی می‌کند و رأی می‌دهد.",
+                "پیروزی با شهر؛ جناح مافیا را شناسایی کنید تا توان آن برای پیروزی از بین برود.", 0, true, true));
+
+        result.add(new Role("lawyer-variant", "وکیل (نسخهٔ جایگزین)", "قابل تنظیم", "نقش نسخه‌های دیگر", "◆",
+                "این نقش در برخی خلاصه‌های نسخهٔ تلویزیونی ذکر شده، اما قانونش میان منابع یکسان نیست.",
+                "قانون دقیق وکیل در مرجع متنی استفاده‌شده برای این نسخه مشخص نشده است. پیش از پخش، قابلیت و محدودیت نسخهٔ میز خود را در همین صفحه ثبت کنید.",
+                "طبق جناح و قانون ثبت‌شده توسط مدیر بازی.", 0, true, true));
+        result.add(new Role("hunter-variant", "شکارچی (نسخهٔ جایگزین)", "قابل تنظیم", "نقش نسخه‌های دیگر", "◆",
+                "در بعضی فهرست‌های آموزشی به‌عنوان نقش افزوده ذکر می‌شود؛ قانون قطعی در این نسخه پیش‌فرض نشده است.",
+                "قابلیت و محدودیت شکارچی به نسخهٔ سناریو بستگی دارد. متن دقیق قوانین مورد استفادهٔ گروه را از مدیریت نقش وارد کنید.",
+                "طبق جناح و قانون ثبت‌شده توسط مدیر بازی.", 0, true, true));
         result.add(new Role("independent-template", "نقش مستقل", "مستقل و خنثی", "مستقل", "◇",
-                "قالب نقش مستقل", "قابلیت و محدودیت‌ها را مدیر بازی تعریف کند.",
-                "شرط پیروزی مستقل را مدیر بازی مشخص کند.", 0, true, true));
-        result.add(new Role("custom-template", "نقش سفارشی", "قابل تنظیم", "سفارشی", "✦",
-                "قالبی برای تعریف نقش جدید", "قابلیت این نقش هنوز تنظیم نشده است.",
-                "شرایط پیروزی هنوز تنظیم نشده است.", 0, true, true));
+                "قالبی برای نقش مستقل یا خنثی سفارشی.",
+                "قابلیت، محدودیت و اهداف این نقش باید به‌صورت سفارشی توسط مدیر تعریف شود؛ قانون رسمی از پیش فرض نشده است.",
+                "شرایط پیروزی مستقل را مدیر بازی مشخص کند.", 0, true, true));
+        result.add(new Role("custom-template", "قالب نقش سفارشی", "قابل تنظیم", "سفارشی", "✦",
+                "قالب آماده برای افزودن نقش جدید؛ پیش از استفاده متن آن را تکمیل کنید.",
+                "قابلیت این نقش هنوز تعریف نشده است. از بخش مدیریت نقش‌ها، قابلیت، جناح و محدودیت‌ها را وارد کنید.",
+                "شرایط پیروزی هنوز تعریف نشده است.", 0, false, true));
         return result;
     }
 
@@ -143,15 +215,22 @@ public class MainActivity extends Activity {
             for (Lineup lineup : lineups) lineupArray.put(lineup.toJson());
             preferences.edit().putString("roles", roleArray.toString())
                     .putString("lineups", lineupArray.toString())
-                    .putInt("playerCount", playerCount).apply();
+                    .putInt("playerCount", playerCount)
+                    .putInt("schemaVersion", DATA_SCHEMA_VERSION).apply();
         } catch (JSONException e) {
             toast("ذخیره‌سازی انجام نشد: داده‌ها قابل تبدیل نیستند.");
         }
     }
 
     private void render() {
+        if (pageScrollView != null && renderedScreen != null) {
+            screenScrollPositions.put(renderedScreen, pageScrollView.getScrollY());
+        }
+        final int restoreScrollY = Math.max(0, screenScrollPositions.getOrDefault(currentScreen, 0));
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         root.setBackgroundColor(Color.parseColor(BACKGROUND));
 
         LinearLayout header = new LinearLayout(this);
@@ -186,6 +265,8 @@ public class MainActivity extends Activity {
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        scroll.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        pageScrollView = scroll;
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(18), dp(8), dp(18), dp(30));
@@ -205,6 +286,8 @@ public class MainActivity extends Activity {
             default: showHome(content);
         }
         setContentView(root);
+        renderedScreen = currentScreen;
+        scroll.post(() -> scroll.scrollTo(0, restoreScrollY));
         if (animateDealCard && "deal".equals(currentScreen) && dealCardView != null) {
             animateDealCard = false;
             dealCardView.setCameraDistance(dp(8000));
@@ -347,12 +430,16 @@ public class MainActivity extends Activity {
             LinearLayout row = panel();
             LinearLayout mainRow = new LinearLayout(this);
             mainRow.setGravity(Gravity.CENTER_VERTICAL);
+            mainRow.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
             mainRow.setOrientation(LinearLayout.HORIZONTAL);
             LinearLayout info = new LinearLayout(this);
             info.setOrientation(LinearLayout.VERTICAL);
-            info.addView(text(role.icon + "  " + role.name, 15, WHITE, true));
+            info.addView(text(role.name, 15, WHITE, true));
             info.addView(text(role.faction + "  •  " + role.shortDescription, 11, MUTED, false));
-            mainRow.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
+            mainRow.addView(rolePortraitView(role, 56, 66), new LinearLayout.LayoutParams(dp(56), dp(66)));
+            LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(0, -2, 1);
+            infoParams.setMargins(dp(8), 0, 0, 0);
+            mainRow.addView(info, infoParams);
             Button minus = button("−", () -> {
                 int next = Math.max(0, builderCounts.getOrDefault(role.id, 0) - 1);
                 if (next == 0) builderCounts.remove(role.id); else builderCounts.put(role.id, next);
@@ -431,12 +518,16 @@ public class MainActivity extends Activity {
             LinearLayout card = panel();
             LinearLayout top = new LinearLayout(this);
             top.setOrientation(LinearLayout.HORIZONTAL);
+            top.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
             top.setGravity(Gravity.CENTER_VERTICAL);
             LinearLayout info = new LinearLayout(this);
             info.setOrientation(LinearLayout.VERTICAL);
-            info.addView(text(role.icon + "  " + role.name, 16, WHITE, true));
+            info.addView(text(role.name, 16, WHITE, true));
             info.addView(text(role.faction + "  •  " + role.category + (role.enabled ? "  •  فعال" : "  •  غیرفعال"), 11, role.enabled ? GOLD : MUTED, false));
-            top.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
+            top.addView(rolePortraitView(role, 76, 88), new LinearLayout.LayoutParams(dp(76), dp(88)));
+            LinearLayout infoParams = new LinearLayout.LayoutParams(0, -2, 1);
+            infoParams.setMargins(dp(8), 0, dp(8), 0);
+            top.addView(info, infoParams);
             top.addView(button("جزئیات", () -> showRoleDetails(role), false));
             card.addView(top);
             addText(card, role.shortDescription, 12, MUTED, false);
@@ -445,6 +536,10 @@ public class MainActivity extends Activity {
                 actions.setOrientation(LinearLayout.HORIZONTAL);
                 Button edit = button("ویرایش", () -> openRoleEditor(role), false);
                 actions.addView(edit, new LinearLayout.LayoutParams(0, dp(42), 1));
+                Button picture = button("تصویر", () -> chooseRoleImage(role), false);
+                LinearLayout.LayoutParams pictureParams = new LinearLayout.LayoutParams(0, dp(42), 1);
+                pictureParams.setMargins(dp(4), 0, 0, 0);
+                actions.addView(picture, pictureParams);
                 Button toggle = button(role.enabled ? "غیرفعال‌سازی" : "فعال‌سازی", () -> {
                     role.enabled = !role.enabled; saveAll(); render();
                 }, false);
@@ -518,7 +613,7 @@ public class MainActivity extends Activity {
         for (Map.Entry<String, Integer> entry : entries) {
             Role role = roleById(entry.getKey());
             if (role == null) continue;
-            addSimpleLine(content, role.icon + "  " + role.name, "× " + entry.getValue() + " نسخه");
+            addRoleLine(content, role, "× " + entry.getValue() + " نسخه");
         }
         if (entries.isEmpty()) addBody(content, "هنوز نقشی در ترکیب انتخاب نشده است.");
 
@@ -589,12 +684,13 @@ public class MainActivity extends Activity {
             TextView back = text("✦", 50, GOLD, true);
             back.setGravity(Gravity.CENTER);
             revealCard.addView(back, new LinearLayout.LayoutParams(-1, dp(95)));
-            addText(revealCard, "کارت محرمانه", 19, WHITE, true);
-            addText(revealCard, player, 15, GOLD, true);
+            addText(revealCard, "MAFIA / کارت محرمانه", 12, GOLD, true);
+            addText(revealCard, player, 15, WHITE, true);
             addText(revealCard, "اطمینان پیدا کن دیگران صفحه را نمی‌بینند؛ سپس نقش را مشاهده کن.", 12, MUTED, false);
             addGap(revealCard, 14);
             revealCard.setCameraDistance(dp(8000));
             dealCardView = revealCard;
+            addText(revealCard, "مافیا  •  بازپرس", 12, GOLD, true);
             revealCard.addView(button("مشاهدهٔ نقش", () -> {
                 revealCard.animate().rotationY(90f).setDuration(150).withEndAction(() -> {
                     cardRevealed = true;
@@ -611,9 +707,7 @@ public class MainActivity extends Activity {
             revealCard.setBackground(round("#17140E", 18, GOLD, 1));
             revealCard.setCameraDistance(dp(8000));
             dealCardView = revealCard;
-            TextView roleIcon = text(role.icon, 44, GOLD, true);
-            roleIcon.setGravity(Gravity.CENTER);
-            revealCard.addView(roleIcon, matchWrap());
+            revealCard.addView(rolePortraitView(role, 184, 194), new LinearLayout.LayoutParams(dp(184), dp(194)));
             TextView roleName = text(role.name, 25, WHITE, true);
             roleName.setGravity(Gravity.CENTER);
             revealCard.addView(roleName, matchWrapTop(9));
@@ -659,8 +753,18 @@ public class MainActivity extends Activity {
             Role role = dealtDeck.get(i);
             LinearLayout card = panel();
             addText(card, "صندلی " + (i + 1) + "  •  " + displayPlayerName(i), 14, GOLD, true);
-            addText(card, role.icon + "  " + role.name, 17, WHITE, true);
-            addText(card, role.faction, 12, MUTED, false);
+            LinearLayout roleRow = new LinearLayout(this);
+            roleRow.setOrientation(LinearLayout.HORIZONTAL);
+            roleRow.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+            roleRow.setGravity(Gravity.CENTER_VERTICAL);
+            roleRow.addView(rolePortraitView(role, 68, 78), new LinearLayout.LayoutParams(dp(68), dp(78)));
+            LinearLayout roleMeta = new LinearLayout(this);
+            roleMeta.setOrientation(LinearLayout.VERTICAL);
+            roleMeta.setPadding(dp(9), 0, 0, 0);
+            addText(roleMeta, role.name, 16, WHITE, true);
+            addText(roleMeta, role.faction, 12, MUTED, false);
+            roleRow.addView(roleMeta, new LinearLayout.LayoutParams(0, -2, 1));
+            card.addView(roleRow);
             setTopMargin(card, 7);
             content.addView(card, matchWrap());
         }
@@ -821,6 +925,12 @@ public class MainActivity extends Activity {
         scroller.addView(fields);
         form.addView(scroller, new LinearLayout.LayoutParams(-1, dp(420)));
 
+        if (target != null) {
+            fields.addView(button("انتخاب تصویر اختصاصی برای این نقش", () -> chooseRoleImage(target), false), matchWrapTop(5));
+            addText(fields, "تصویر انتخاب‌شده پس از بازگشت از انتخاب‌گر ذخیره می‌شود.", 11, MUTED, false);
+        } else {
+            addBody(fields, "ابتدا نقش را ذخیره کن؛ سپس از فهرست مدیریت نقش‌ها تصویر اختصاصی آن را انتخاب کن.");
+        }
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(target == null ? "نقش جدید" : "ویرایش نقش")
                 .setView(form).setNegativeButton("انصراف", null).setPositiveButton("ذخیره", null).create();
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
@@ -933,12 +1043,40 @@ public class MainActivity extends Activity {
         startActivityForResult(intent, PICK_IMPORT);
     }
 
+    private void chooseRoleImage(Role role) {
+        if (role == null) { toast("ابتدا نقش را ذخیره کن."); return; }
+        pendingImageRoleId = role.id;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(intent, PICK_ROLE_IMAGE);
+    }
+
+    private void saveRoleImage(Uri uri) {
+        try {
+            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Exception ignored) {
+            // Some document providers offer a transient but usable grant.
+        }
+        Role role = roleById(pendingImageRoleId);
+        if (role == null) { toast("نقش مربوط به تصویر پیدا نشد."); return; }
+        role.imageUri = uri.toString();
+        portraitCache.remove(role.id);
+        saveAll();
+        currentScreen = "roles";
+        toast("تصویر اختصاصی ذخیره شد.");
+        render();
+        pendingImageRoleId = null;
+    }
+
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         if (requestCode == PICK_EXPORT) writeExport(uri, roleOnlyExport);
         else if (requestCode == PICK_IMPORT) readImport(uri);
+        else if (requestCode == PICK_ROLE_IMAGE) saveRoleImage(uri);
     }
 
     private JSONObject toBackup(boolean onlyRoles) throws JSONException {
@@ -1000,6 +1138,97 @@ public class MainActivity extends Activity {
                         ensurePlayerNames(); saveAll(); render(); toast("اطلاعات بازیابی شد.");
                     }).show();
         } catch (Exception e) { toast("فایل نامعتبر یا ناخواناست: " + e.getMessage()); }
+    }
+
+    private void addRoleLine(LinearLayout parent, Role role, String right) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+        row.setBackground(round(PANEL, 11, "#3A3020", 1));
+        row.addView(rolePortraitView(role, 50, 56), new LinearLayout.LayoutParams(dp(50), dp(56)));
+        TextView left = text(role.name, 13, WHITE, true);
+        LinearLayout.LayoutParams leftParams = new LinearLayout.LayoutParams(0, -2, 1);
+        leftParams.setMargins(dp(9), 0, dp(9), 0);
+        row.addView(left, leftParams);
+        row.addView(text(right, 12, GOLD, false), new LinearLayout.LayoutParams(-2, -2));
+        setTopMargin(row, 6);
+        parent.addView(row, matchWrap());
+    }
+
+    private View rolePortraitView(Role role, int widthDp, int heightDp) {
+        LinearLayout frame = new LinearLayout(this);
+        frame.setOrientation(LinearLayout.VERTICAL);
+        frame.setPadding(dp(2), dp(2), dp(2), dp(2));
+        frame.setBackground(round("#16120C", 11, GOLD, 1));
+        ImageView image = new ImageView(this);
+        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image.setBackgroundColor(Color.parseColor("#171717"));
+        Bitmap bitmap = loadRolePortrait(role);
+        if (bitmap != null) image.setImageBitmap(bitmap);
+        image.setClipToOutline(true);
+        frame.addView(image, new LinearLayout.LayoutParams(dp(Math.max(12, widthDp - 4)), dp(Math.max(12, heightDp - 4))));
+        return frame;
+    }
+
+    private Bitmap loadRolePortrait(Role role) {
+        if (role == null) return null;
+        String cacheKey = role.imageUri != null && !role.imageUri.isEmpty()
+                ? "uri:" + role.imageUri : "built-in:" + role.id;
+        if (portraitCache.containsKey(cacheKey)) return portraitCache.get(cacheKey);
+        Bitmap bitmap = null;
+        if (role.imageUri != null && !role.imageUri.trim().isEmpty()) {
+            try {
+                BitmapFactory.Options bounds = new BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                try (InputStream in = getContentResolver().openInputStream(Uri.parse(role.imageUri))) {
+                    BitmapFactory.decodeStream(in, null, bounds);
+                }
+                int sample = 1;
+                while (bounds.outWidth / sample > 720 || bounds.outHeight / sample > 900) sample *= 2;
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inSampleSize = sample;
+                try (InputStream in = getContentResolver().openInputStream(Uri.parse(role.imageUri))) {
+                    bitmap = BitmapFactory.decodeStream(in, null, options);
+                }
+            } catch (Exception ignored) {
+                bitmap = null;
+            }
+        }
+        if (bitmap == null) {
+            try {
+                if (portraitSheet == null) portraitSheet = BitmapFactory.decodeResource(getResources(), R.drawable.role_portraits);
+                if (portraitSheet != null) {
+                    int col = portraitIndex(role) % 4;
+                    int row = portraitIndex(role) / 4;
+                    int cellW = portraitSheet.getWidth() / 4;
+                    int cellH = portraitSheet.getHeight() / 3;
+                    bitmap = Bitmap.createBitmap(portraitSheet, col * cellW, row * cellH, cellW, cellH);
+                }
+            } catch (Exception ignored) {
+                bitmap = null;
+            }
+        }
+        if (bitmap != null) portraitCache.put(cacheKey, bitmap);
+        return bitmap;
+    }
+
+    private int portraitIndex(Role role) {
+        String id = role.id == null ? "" : role.id.toLowerCase(Locale.ROOT);
+        String name = role.name == null ? "" : role.name;
+        if (id.contains("godfather") || name.contains("رئیس مافیا")) return 0;
+        if (id.equals("nato") || name.equals("ناتو")) return 1;
+        if (id.equals("shayad") || name.contains("شیاد")) return 2;
+        if (id.equals("mafia-simple") || name.contains("مافیای ساده")) return 3;
+        if (id.contains("doctor") || name.contains("پزشک")) return 4;
+        if (id.contains("detective") || name.contains("کارآگاه")) return 5;
+        if (id.contains("roein-tan") || name.contains("رویین‌تن") || name.contains("رویین تن")) return 6;
+        if (id.contains("sniper") || name.contains("اسنایپر")) return 7;
+        if (id.contains("mohaqeq") || name.contains("محقق")) return 8;
+        if (id.contains("bazpors") || name.contains("بازپرس")) return 9;
+        if (id.contains("citizen") || name.contains("شهروند")) return 10;
+        return 11;
     }
 
     private Role roleById(String id) {
