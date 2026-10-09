@@ -71,6 +71,8 @@ public class MainActivity extends Activity {
     private boolean cardRevealed = false;
     private boolean dealingPaused = false;
     private boolean roleOnlyExport = false;
+    private View dealCardView;
+    private boolean animateDealCard = false;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -190,6 +192,7 @@ public class MainActivity extends Activity {
         scroll.addView(content);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
+        dealCardView = null;
         switch (currentScreen) {
             case "builder": showBuilder(content); break;
             case "bank": showBank(content, false); break;
@@ -202,6 +205,14 @@ public class MainActivity extends Activity {
             default: showHome(content);
         }
         setContentView(root);
+        if (animateDealCard && "deal".equals(currentScreen) && dealCardView != null) {
+            animateDealCard = false;
+            dealCardView.setCameraDistance(dp(8000));
+            dealCardView.setRotationY(cardRevealed ? -90f : 90f);
+            dealCardView.animate().rotationY(0f).setDuration(170).start();
+        } else {
+            animateDealCard = false;
+        }
     }
 
     private void showHome(LinearLayout content) {
@@ -582,7 +593,15 @@ public class MainActivity extends Activity {
             addText(revealCard, player, 15, GOLD, true);
             addText(revealCard, "اطمینان پیدا کن دیگران صفحه را نمی‌بینند؛ سپس نقش را مشاهده کن.", 12, MUTED, false);
             addGap(revealCard, 14);
-            revealCard.addView(button("مشاهدهٔ نقش", () -> { cardRevealed = true; render(); }, true));
+            revealCard.setCameraDistance(dp(8000));
+            dealCardView = revealCard;
+            revealCard.addView(button("مشاهدهٔ نقش", () -> {
+                revealCard.animate().rotationY(90f).setDuration(150).withEndAction(() -> {
+                    cardRevealed = true;
+                    animateDealCard = true;
+                    render();
+                }).start();
+            }, true));
             content.addView(revealCard, matchWrap());
         } else {
             Role role = dealtDeck.get(currentPlayerIndex);
@@ -590,6 +609,8 @@ public class MainActivity extends Activity {
             revealCard.setGravity(Gravity.CENTER_HORIZONTAL);
             revealCard.setPadding(dp(20), dp(25), dp(20), dp(25));
             revealCard.setBackground(round("#17140E", 18, GOLD, 1));
+            revealCard.setCameraDistance(dp(8000));
+            dealCardView = revealCard;
             TextView roleIcon = text(role.icon, 44, GOLD, true);
             roleIcon.setGravity(Gravity.CENTER);
             revealCard.addView(roleIcon, matchWrap());
@@ -606,9 +627,12 @@ public class MainActivity extends Activity {
             addText(revealCard, role.winCondition, 13, MUTED, false);
             addGap(revealCard, 13);
             revealCard.addView(button("متوجه شدم؛ پنهان کن", () -> {
-                cardRevealed = false;
-                currentPlayerIndex++;
-                render();
+                revealCard.animate().rotationY(-90f).setDuration(150).withEndAction(() -> {
+                    cardRevealed = false;
+                    currentPlayerIndex++;
+                    animateDealCard = true;
+                    render();
+                }).start();
             }, true));
             content.addView(revealCard, matchWrap());
         }
@@ -770,11 +794,15 @@ public class MainActivity extends Activity {
         fields.setOrientation(LinearLayout.VERTICAL);
         EditText name = formField(fields, "نام نقش *", target == null ? "" : target.name, false);
         EditText icon = formField(fields, "آیکون / نماد", target == null ? "✦" : target.icon, false);
-        Spinner faction = spinner(new String[]{"مافیایی", "شهروندی", "مستقل و خنثی", "ویژه سناریوی بازپرس", "قابل تنظیم"});
-        if (target != null) {
-            int ix = indexOfSpinner(faction, target.faction);
-            faction.setSelection(ix);
-        }
+        ArrayList<String> factionChoices = new ArrayList<>();
+        factionChoices.add("مافیایی");
+        factionChoices.add("شهروندی");
+        factionChoices.add("مستقل و خنثی");
+        factionChoices.add("ویژه سناریوی بازپرس");
+        factionChoices.add("قابل تنظیم");
+        if (target != null && !factionChoices.contains(target.faction)) factionChoices.add(target.faction);
+        Spinner faction = spinner(factionChoices);
+        if (target != null) faction.setSelection(indexOfSpinner(faction, target.faction));
         addFieldLabel(fields, "جناح"); fields.addView(faction, matchWrapTop(4));
         EditText category = formField(fields, "دسته", target == null ? "سفارشی" : target.category, false);
         EditText shortDesc = formField(fields, "توضیح کوتاه", target == null ? "" : target.shortDescription, false);
