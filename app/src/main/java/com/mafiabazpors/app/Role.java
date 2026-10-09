@@ -15,6 +15,8 @@ public final class Role {
     public int suggestedCount;
     public boolean enabled;
     public boolean repeatAllowed;
+    /** Optional content URI chosen by the user; built-in portraits are bundled locally. */
+    public String imageUri;
 
     public Role(String id, String name, String faction, String category, String icon,
                 String shortDescription, String ability, String winCondition,
@@ -33,8 +35,10 @@ public final class Role {
     }
 
     public Role copy() {
-        return new Role(id, name, faction, category, icon, shortDescription, ability,
+        Role copied = new Role(id, name, faction, category, icon, shortDescription, ability,
                 winCondition, suggestedCount, enabled, repeatAllowed);
+        copied.imageUri = imageUri;
+        return copied;
     }
 
     public JSONObject toJson() throws JSONException {
@@ -50,11 +54,12 @@ public final class Role {
         object.put("suggestedCount", suggestedCount);
         object.put("enabled", enabled);
         object.put("repeatAllowed", repeatAllowed);
+        if (imageUri != null && !imageUri.trim().isEmpty()) object.put("imageUri", imageUri);
         return object;
     }
 
     public static Role fromJson(JSONObject object) throws JSONException {
-        return new Role(
+        Role role = new Role(
                 object.optString("id", "role-" + System.nanoTime()),
                 object.optString("name", "نقش بدون نام"),
                 object.optString("faction", "قابل تنظیم"),
@@ -66,5 +71,8 @@ public final class Role {
                 Math.max(0, object.optInt("suggestedCount", 0)),
                 object.optBoolean("enabled", true),
                 object.optBoolean("repeatAllowed", true));
+        role.imageUri = object.optString("imageUri", null);
+        return role;
     }
+
 }
